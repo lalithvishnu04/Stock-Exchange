@@ -14,10 +14,8 @@ build/
 venv/
 env/
 
-# Node / React build
+# Node / React — keep dist/ so others don't need Node.js to run the app
 node_modules/
-frontend/dist/
-frontend/build/
 *.local
 
 # Docker volumes / data

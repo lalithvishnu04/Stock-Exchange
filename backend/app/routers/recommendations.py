@@ -1,21 +1,16 @@
 from datetime import datetime, timezone, date
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from sqlalchemy import select
-import redis.asyncio as aioredis
 from app.core.deps import CurrentUser, DbSession
 from app.models.recommendation import Recommendation
 from app.schemas.recommendation import RecommendationOut, TodayRecommendations, MarketOverview, SectorPerformance, NewsItem, AnalysisRequest
 from app.services.market_data import MarketDataService
 from app.services.sentiment import SentimentService
 from app.services.analysis_runner import analyse_stock_for_user
-from app.config import settings
 
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 _sentiment_svc = SentimentService()
-
-
-def _get_redis() -> aioredis.Redis:
-    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+_market_svc = MarketDataService()
 
 
 @router.get("/today", response_model=TodayRecommendations)
@@ -79,7 +74,6 @@ async def analyse_stock(
     db: DbSession,
 ):
     """Trigger on-demand analysis for a specific stock."""
-    redis_client = _get_redis()
     from app.models.portfolio import Holding
     holding = (await db.execute(
         select(Holding).where(
@@ -90,10 +84,9 @@ async def analyse_stock(
     )).scalar_one_or_none()
 
     rec = await analyse_stock_for_user(
-        db, redis_client, current_user,
+        db, current_user,
         payload.symbol.upper(), payload.exchange, holding
     )
-    await redis_client.aclose()
     if not rec:
         raise HTTPException(status_code=404, detail="Could not fetch data for this symbol")
     return RecommendationOut.model_validate(rec)
@@ -101,42 +94,32 @@ async def analyse_stock(
 
 @router.get("/market-overview", response_model=MarketOverview)
 async def get_market_overview():
-    redis_client = _get_redis()
-    try:
-        svc = MarketDataService(redis_client)
-        data = await svc.get_market_overview()
-        n50 = data.get("NIFTY50", {})
-        nb = data.get("NIFTYBANK", {})
-        sx = data.get("SENSEX", {})
-        mid = data.get("NIFTY_MIDCAP", {})
-        return MarketOverview(
-            nifty50=n50.get("price", 0),
-            nifty50_change=n50.get("change", 0),
-            nifty50_change_pct=n50.get("change_pct", 0),
-            niftybank=nb.get("price", 0),
-            niftybank_change=nb.get("change", 0),
-            niftybank_change_pct=nb.get("change_pct", 0),
-            sensex=sx.get("price", 0),
-            sensex_change=sx.get("change", 0),
-            sensex_change_pct=sx.get("change_pct", 0),
-            nifty_midcap=mid.get("price", 0),
-            nifty_midcap_change_pct=mid.get("change_pct", 0),
-            market_status=data.get("market_status", "CLOSED"),
-            as_of=datetime.fromisoformat(data.get("as_of", datetime.now(timezone.utc).isoformat())),
-        )
-    finally:
-        await redis_client.aclose()
+    data = await _market_svc.get_market_overview()
+    n50 = data.get("NIFTY50", {})
+    nb = data.get("NIFTYBANK", {})
+    sx = data.get("SENSEX", {})
+    mid = data.get("NIFTY_MIDCAP", {})
+    return MarketOverview(
+        nifty50=n50.get("price", 0),
+        nifty50_change=n50.get("change", 0),
+        nifty50_change_pct=n50.get("change_pct", 0),
+        niftybank=nb.get("price", 0),
+        niftybank_change=nb.get("change", 0),
+        niftybank_change_pct=nb.get("change_pct", 0),
+        sensex=sx.get("price", 0),
+        sensex_change=sx.get("change", 0),
+        sensex_change_pct=sx.get("change_pct", 0),
+        nifty_midcap=mid.get("price", 0),
+        nifty_midcap_change_pct=mid.get("change_pct", 0),
+        market_status=data.get("market_status", "CLOSED"),
+        as_of=datetime.fromisoformat(data.get("as_of", datetime.now(timezone.utc).isoformat())),
+    )
 
 
 @router.get("/sector-performance", response_model=list[SectorPerformance])
 async def get_sector_performance():
-    redis_client = _get_redis()
-    try:
-        svc = MarketDataService(redis_client)
-        sectors = await svc.get_sector_performance()
-        return [SectorPerformance(**s) for s in sectors]
-    finally:
-        await redis_client.aclose()
+    sectors = await _market_svc.get_sector_performance()
+    return [SectorPerformance(**s) for s in sectors]
 
 
 @router.get("/news", response_model=list[NewsItem])

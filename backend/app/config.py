@@ -15,12 +15,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # Database
-    DATABASE_URL: str
+    # Database — defaults to local SQLite (zero install)
+    DATABASE_URL: str = "sqlite+aiosqlite:///./stock_advisor.db"
     SYNC_DATABASE_URL: Optional[str] = None
 
-    # Redis
-    REDIS_URL: str
+    # Redis — leave empty to use in-memory cache (no Redis install needed)
+    REDIS_URL: str = ""
     CACHE_TTL_SECONDS: int = 300
 
     # OpenAI

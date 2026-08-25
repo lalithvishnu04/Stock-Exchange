@@ -13,28 +13,24 @@ from app.services.sentiment import SentimentService
 from app.services.ai_engine import generate_recommendation
 from app.services.portfolio_analyzer import PortfolioAnalyzer
 from app.services.notifications import NotificationService
-import redis.asyncio as aioredis
-from app.config import settings
 
 _technical_svc = TechnicalAnalysisService()
 _fundamental_svc = FundamentalAnalysisService()
 _sentiment_svc = SentimentService()
 _portfolio_svc = PortfolioAnalyzer()
 _notif_svc = NotificationService()
+_market_svc = MarketDataService()
 
 
 async def analyse_stock_for_user(
     db: AsyncSession,
-    redis_client: aioredis.Redis,
     user: User,
     symbol: str,
     exchange: str = "NSE",
     holding: Holding | None = None,
 ) -> Recommendation | None:
-    market_svc = MarketDataService(redis_client)
-
     # Fetch market data
-    stock_data = await market_svc.get_stock_data(symbol, exchange)
+    stock_data = await _market_svc.get_stock_data(symbol, exchange)
     if not stock_data:
         return None
 
@@ -115,7 +111,6 @@ async def analyse_stock_for_user(
 
 async def run_full_analysis_for_all_users(session_type: str = "scheduled"):
     async with AsyncSessionLocal() as db:
-        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
         try:
             users = (await db.execute(select(User).where(User.is_active == True))).scalars().all()
             for user in users:
@@ -126,20 +121,18 @@ async def run_full_analysis_for_all_users(session_type: str = "scheduled"):
                 ).scalars().all()
                 for holding in holdings:
                     try:
-                        await analyse_stock_for_user(db, redis_client, user, holding.tradingsymbol, holding.exchange, holding)
+                        await analyse_stock_for_user(db, user, holding.tradingsymbol, holding.exchange, holding)
                     except Exception:
                         pass
             await db.commit()
-        finally:
-            await redis_client.aclose()
+        except Exception:
+            pass
 
 
 async def run_intraday_check_for_all_users():
     """Lightweight intraday check – only flag stop-loss breaches."""
     async with AsyncSessionLocal() as db:
-        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
         try:
-            market_svc = MarketDataService(redis_client)
             users = (await db.execute(select(User).where(User.is_active == True))).scalars().all()
             for user in users:
                 holdings = (
@@ -149,11 +142,10 @@ async def run_intraday_check_for_all_users():
                 ).scalars().all()
                 for holding in holdings:
                     try:
-                        stock_data = await market_svc.get_stock_data(holding.tradingsymbol, holding.exchange, period="5d")
+                        stock_data = await _market_svc.get_stock_data(holding.tradingsymbol, holding.exchange, period="5d")
                         if not stock_data:
                             continue
                         cur_price = stock_data.get("current_price", 0)
-                        # Stop-loss breach: price dropped 7%+ from average
                         avg = float(holding.average_price)
                         if avg > 0 and cur_price < avg * 0.93:
                             await _notif_svc.send_recommendation_alert(
@@ -164,11 +156,11 @@ async def run_intraday_check_for_all_users():
                                 current_price=cur_price,
                                 target_price=None,
                                 stop_loss=round(avg * 0.93, 2),
-                                reason=f"⚠️ Stop-loss breach: price ₹{cur_price:.2f} is >7% below your average ₹{avg:.2f}. Consider exiting to limit losses.",
+                                reason=f"⚠️ Stop-loss breach: price ₹{cur_price:.2f} is >7% below your average ₹{avg:.2f}.",
                                 chat_id=user.telegram_chat_id,
                                 email_to=user.email if user.email_alerts_enabled else None,
                             )
                     except Exception:
                         pass
-        finally:
-            await redis_client.aclose()
+        except Exception:
+            pass

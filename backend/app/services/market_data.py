@@ -1,14 +1,13 @@
-"""Market data fetching via yfinance with Redis caching."""
+"""Market data fetching via yfinance with in-memory cache (Redis optional)."""
+import time
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 import pandas as pd
 import yfinance as yf
-import redis.asyncio as aioredis
 from app.config import settings
 
 
-# NSE symbol → yfinance ticker mapping helper
 def to_yf_symbol(symbol: str, exchange: str = "NSE") -> str:
     if exchange.upper() == "NSE":
         return f"{symbol}.NS"
@@ -35,20 +34,22 @@ SECTOR_ETF_MAP = {
     "Energy": "NIFTYENERGY.NS",
 }
 
+# Simple in-memory cache: key → (data, expires_at_timestamp)
+_mem_cache: dict = {}
+
 
 class MarketDataService:
-    def __init__(self, redis_client: aioredis.Redis):
-        self.redis = redis_client
+    def __init__(self):
         self.ttl = settings.CACHE_TTL_SECONDS
 
     async def _get_cached(self, key: str) -> Optional[dict]:
-        raw = await self.redis.get(key)
-        if raw:
-            return json.loads(raw)
+        entry = _mem_cache.get(key)
+        if entry and time.monotonic() < entry[1]:
+            return entry[0]
         return None
 
     async def _set_cache(self, key: str, data: dict, ttl: int | None = None) -> None:
-        await self.redis.setex(key, ttl or self.ttl, json.dumps(data, default=str))
+        _mem_cache[key] = (data, time.monotonic() + (ttl or self.ttl))
 
     async def get_market_overview(self) -> dict:
         cached = await self._get_cached("market:overview")
