@@ -1,8 +1,10 @@
-"""Technical analysis indicators using pandas_ta."""
+"""Technical analysis indicators using the `ta` library (pure Python, no numba)."""
 from typing import Optional
 import pandas as pd
-import pandas_ta as ta
 import numpy as np
+from ta.momentum import RSIIndicator
+from ta.trend import MACD, SMAIndicator, EMAIndicator, ADXIndicator
+from ta.volatility import BollingerBands
 
 
 class TechnicalAnalysisService:
@@ -20,40 +22,29 @@ class TechnicalAnalysisService:
             "volume": ohlcv["volume"],
         })
         df.index = pd.to_datetime(ohlcv.get("dates", range(len(df))))
+        c = df["close"]
 
         # ── Moving Averages ──────────────────────────────────────────
-        df.ta.sma(length=20, append=True)
-        df.ta.sma(length=50, append=True)
-        df.ta.ema(length=20, append=True)
-        df.ta.ema(length=50, append=True)
+        sma20 = float(SMAIndicator(c, window=20).sma_indicator().iloc[-1] or c.iloc[-1])
+        sma50 = float(SMAIndicator(c, window=50).sma_indicator().iloc[-1] or c.iloc[-1])
+        ema20 = float(EMAIndicator(c, window=20).ema_indicator().iloc[-1] or c.iloc[-1])
 
         # ── Momentum ─────────────────────────────────────────────────
-        df.ta.rsi(length=14, append=True)
-        df.ta.macd(fast=12, slow=26, signal=9, append=True)
+        rsi = float(RSIIndicator(c, window=14).rsi().iloc[-1] or 50)
+        _macd = MACD(c, window_fast=12, window_slow=26, window_sign=9)
+        macd_val    = float(_macd.macd().iloc[-1] or 0)
+        macd_signal = float(_macd.macd_signal().iloc[-1] or 0)
+        macd_hist   = float(_macd.macd_diff().iloc[-1] or 0)
 
         # ── Volatility ───────────────────────────────────────────────
-        df.ta.bbands(length=20, std=2, append=True)
-        df.ta.atr(length=14, append=True)
-
-        # ── Volume ───────────────────────────────────────────────────
-        df.ta.obv(append=True)
+        bb = BollingerBands(c, window=20, window_dev=2)
+        bb_upper = float(bb.bollinger_hband().iloc[-1] or c.iloc[-1] * 1.02)
+        bb_lower = float(bb.bollinger_lband().iloc[-1] or c.iloc[-1] * 0.98)
 
         # ── Trend ────────────────────────────────────────────────────
-        df.ta.adx(length=14, append=True)
+        adx = float(ADXIndicator(df["high"], df["low"], c, window=14).adx().iloc[-1] or 25)
 
-        last = df.iloc[-1]
-        close = float(last["close"])
-
-        rsi = float(last.get("RSI_14", 50) or 50)
-        macd_val = float(last.get("MACD_12_26_9", 0) or 0)
-        macd_signal = float(last.get("MACDs_12_26_9", 0) or 0)
-        macd_hist = float(last.get("MACDh_12_26_9", 0) or 0)
-        sma20 = float(last.get("SMA_20", close) or close)
-        sma50 = float(last.get("SMA_50", close) or close)
-        ema20 = float(last.get("EMA_20", close) or close)
-        bb_upper = float(last.get("BBU_20_2.0", close * 1.02) or close * 1.02)
-        bb_lower = float(last.get("BBL_20_2.0", close * 0.98) or close * 0.98)
-        adx = float(last.get("ADX_14", 25) or 25)
+        close = float(c.iloc[-1])
 
         # ── Signals ──────────────────────────────────────────────────
         signals = []
