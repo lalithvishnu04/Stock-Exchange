@@ -68,7 +68,7 @@ export default function RecommendationsPage() {
 
           {analyseMutation.data && (
             <Box sx={{ mt: 2, maxWidth: 400 }}>
-              <RecommendationCard rec={analyseMutation.data} />
+              <RecommendationCard rec={analyseMutation.data.data} />
             </Box>
           )}
           {analyseMutation.isError && (

@@ -92,6 +92,29 @@ async def analyse_stock(
     return RecommendationOut.model_validate(rec)
 
 
+@router.post("/run-all")
+async def run_analysis_for_all_holdings(current_user: CurrentUser, db: DbSession):
+    """Trigger analysis for every active holding in the user's portfolio."""
+    from app.models.portfolio import Holding
+    holdings = (await db.execute(
+        select(Holding).where(Holding.user_id == current_user.id, Holding.is_active == True)
+    )).scalars().all()
+
+    if not holdings:
+        raise HTTPException(status_code=400, detail="No holdings found. Add stocks to your portfolio first.")
+
+    results = []
+    for h in holdings:
+        try:
+            rec = await analyse_stock_for_user(db, current_user, h.tradingsymbol, h.exchange, h)
+            if rec:
+                results.append({"symbol": h.tradingsymbol, "signal": rec.signal.value})
+        except Exception:
+            results.append({"symbol": h.tradingsymbol, "signal": "ERROR"})
+
+    return {"analysed": len(results), "results": results}
+
+
 @router.get("/market-overview", response_model=MarketOverview)
 async def get_market_overview():
     data = await _market_svc.get_market_overview()

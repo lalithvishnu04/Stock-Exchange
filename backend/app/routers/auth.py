@@ -5,7 +5,7 @@ from app.core.deps import DbSession
 from app.core.security import hash_password, verify_password, create_access_token, create_refresh_token, decode_token
 from app.models.user import User
 from app.models.recommendation import Recommendation
-from app.schemas.auth import UserCreate, UserLogin, TokenResponse, RefreshTokenRequest, UserOut, UserSettingsUpdate
+from app.schemas.auth import UserCreate, UserLogin, TokenResponse, RefreshTokenRequest, UserOut, UserSettingsUpdate, ZerodhaConnectRequest
 from app.core.deps import CurrentUser
 from app.config import settings
 
@@ -28,6 +28,7 @@ async def register(payload: UserCreate, db: DbSession):
     )
     db.add(user)
     await db.flush()
+    await db.refresh(user)
     return _user_out(user)
 
 
@@ -76,7 +77,12 @@ async def update_settings(payload: UserSettingsUpdate, current_user: CurrentUser
         current_user.telegram_alerts_enabled = payload.telegram_alerts_enabled
     if payload.telegram_chat_id is not None:
         current_user.telegram_chat_id = payload.telegram_chat_id
+    if payload.zerodha_api_key is not None:
+        current_user.zerodha_api_key = payload.zerodha_api_key or None
+    if payload.zerodha_api_secret is not None:
+        current_user.zerodha_api_secret = payload.zerodha_api_secret or None
     await db.flush()
+    await db.refresh(current_user)
     return _user_out(current_user)
 
 
@@ -109,6 +115,6 @@ def _user_out(user: User) -> dict:
         is_active=user.is_active,
         email_alerts_enabled=user.email_alerts_enabled,
         telegram_alerts_enabled=user.telegram_alerts_enabled,
-        has_zerodha_connected=False,
+        has_zerodha_connected=bool(user.zerodha_access_token),
         created_at=user.created_at,
     )

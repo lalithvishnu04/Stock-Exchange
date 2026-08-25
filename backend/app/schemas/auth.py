@@ -65,3 +65,9 @@ class UserSettingsUpdate(BaseModel):
     email_alerts_enabled: Optional[bool] = None
     telegram_alerts_enabled: Optional[bool] = None
     telegram_chat_id: Optional[str] = None
+    zerodha_api_key: Optional[str] = None
+    zerodha_api_secret: Optional[str] = None
+
+
+class ZerodhaConnectRequest(BaseModel):
+    request_token: str

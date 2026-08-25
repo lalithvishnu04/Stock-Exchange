@@ -24,14 +24,14 @@ INDEX_SYMBOLS = {
 }
 
 SECTOR_ETF_MAP = {
-    "IT": "NIFTYIT.NS",
-    "Banking": "BANKNIFTY.NS",
-    "Pharma": "NIFTYPHARMA.NS",
-    "Auto": "NIFTYAUTO.NS",
-    "FMCG": "NIFTYFMCG.NS",
-    "Metal": "NIFTYMETAL.NS",
-    "Realty": "NIFTYREALTY.NS",
-    "Energy": "NIFTYENERGY.NS",
+    "IT": "^CNXIT",
+    "Banking": "^NSEBANK",
+    "Pharma": "^CNXPHARMA",
+    "Auto": "^CNXAUTO",
+    "FMCG": "^CNXFMCG",
+    "Metal": "^CNXMETAL",
+    "Realty": "^CNXREALTY",
+    "Energy": "^CNXENERGY",
 }
 
 # Simple in-memory cache: key → (data, expires_at_timestamp)

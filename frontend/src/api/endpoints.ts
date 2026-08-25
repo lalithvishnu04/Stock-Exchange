@@ -34,6 +34,7 @@ export const portfolioApi = {
   alerts: (limit = 50) => apiClient.get<AlertLog[]>(`/portfolio/alerts?limit=${limit}`),
   reports: (limit = 30) => apiClient.get<any[]>(`/portfolio/reports?limit=${limit}`),
   reportContent: (id: number) => apiClient.get<string>(`/portfolio/reports/${id}`),
+  sync: () => apiClient.get('/portfolio/sync'),
 };
 
 // ── Recommendations ───────────────────────────────────────────────────────────
@@ -43,6 +44,7 @@ export const recommendationsApi = {
     apiClient.get<Recommendation[]>(`/recommendations/history?limit=${limit}${symbol ? `&symbol=${symbol}` : ''}`),
   analyse: (symbol: string, exchange = 'NSE') =>
     apiClient.post<Recommendation>('/recommendations/analyse', { symbol, exchange }),
+  runAll: () => apiClient.post('/recommendations/run-all'),
   marketOverview: () => apiClient.get<MarketOverview>('/recommendations/market-overview'),
   sectorPerformance: () => apiClient.get<SectorPerformance[]>('/recommendations/sector-performance'),
   news: (symbol?: string) =>
