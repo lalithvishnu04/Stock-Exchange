@@ -12,12 +12,8 @@ export const authApi = {
   register: (data: { username: string; email: string; password: string; full_name?: string }) =>
     apiClient.post<User>('/auth/register', data),
   me: () => apiClient.get<User>('/auth/me'),
-  updateSettings: (data: Partial<User & { zerodha_api_key?: string; zerodha_api_secret?: string }>) =>
+  updateSettings: (data: Partial<User>) =>
     apiClient.put<User>('/auth/settings', data),
-  connectZerodha: (request_token: string) =>
-    apiClient.post('/auth/zerodha/connect', { request_token }),
-  getZerodhaLoginUrl: () =>
-    `${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/zerodha/login-url`,
 };
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
@@ -34,7 +30,6 @@ export const portfolioApi = {
   alerts: (limit = 50) => apiClient.get<AlertLog[]>(`/portfolio/alerts?limit=${limit}`),
   reports: (limit = 30) => apiClient.get<any[]>(`/portfolio/reports?limit=${limit}`),
   reportContent: (id: number) => apiClient.get<string>(`/portfolio/reports/${id}`),
-  sync: () => apiClient.get('/portfolio/sync'),
 };
 
 // ── Recommendations ───────────────────────────────────────────────────────────
@@ -44,7 +39,8 @@ export const recommendationsApi = {
     apiClient.get<Recommendation[]>(`/recommendations/history?limit=${limit}${symbol ? `&symbol=${symbol}` : ''}`),
   analyse: (symbol: string, exchange = 'NSE') =>
     apiClient.post<Recommendation>('/recommendations/analyse', { symbol, exchange }),
-  runAll: () => apiClient.post('/recommendations/run-all'),
+  analyseAll: () =>
+    apiClient.post<{ analysed: number; recommendations: Recommendation[] }>('/recommendations/analyse-all'),
   marketOverview: () => apiClient.get<MarketOverview>('/recommendations/market-overview'),
   sectorPerformance: () => apiClient.get<SectorPerformance[]>('/recommendations/sector-performance'),
   news: (symbol?: string) =>
