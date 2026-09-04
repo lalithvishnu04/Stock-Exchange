@@ -4,7 +4,8 @@ import {
   Tabs, Tab, Chip, Alert, CircularProgress,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { recommendationsApi } from '../api/endpoints';
 import RecommendationCard from '../components/Dashboard/RecommendationCard';
 import SignalBadge from '../components/common/SignalBadge';
@@ -23,6 +24,7 @@ const TABS: { label: string; key: Signal | 'ALL' }[] = [
 export default function RecommendationsPage() {
   const [tab, setTab] = useState<Signal | 'ALL'>('ALL');
   const [symbol, setSymbol] = useState('');
+  const queryClient = useQueryClient();
 
   const { data: today, isLoading } = useQuery({
     queryKey: ['today-recommendations'],
@@ -32,6 +34,13 @@ export default function RecommendationsPage() {
   const analyseMutation = useMutation({
     mutationFn: () => recommendationsApi.analyse(symbol.trim().toUpperCase()),
     onSuccess: () => setSymbol(''),
+  });
+
+  const analyseAllMutation = useMutation({
+    mutationFn: () => recommendationsApi.analyseAll(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['today-recommendations'] });
+    },
   });
 
   const allRecs = today
@@ -84,11 +93,23 @@ export default function RecommendationsPage() {
         <CardContent>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
             <Typography variant="h6" fontWeight={700}>Today's Analysis</Typography>
-            {today?.last_updated && (
-              <Typography variant="caption" color="text.secondary">
-                Updated {new Date(today.last_updated).toLocaleTimeString('en-IN')}
-              </Typography>
-            )}
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+              <Button
+                variant="contained"
+                color="success"
+                size="small"
+                startIcon={analyseAllMutation.isPending ? <CircularProgress size={16} color="inherit" /> : <PlayArrowIcon />}
+                disabled={analyseAllMutation.isPending}
+                onClick={() => analyseAllMutation.mutate()}
+              >
+                Analyse All Holdings
+              </Button>
+              {today?.last_updated && (
+                <Typography variant="caption" color="text.secondary">
+                  Updated {new Date(today.last_updated).toLocaleTimeString('en-IN')}
+                </Typography>
+              )}
+            </Box>
           </Box>
 
           <Tabs
@@ -114,6 +135,12 @@ export default function RecommendationsPage() {
             <Typography color="text.secondary" sx={{ textAlign: 'center', py: 4 }}>
               No {tab === 'ALL' ? '' : tab} recommendations today.
             </Typography>
+          )}
+
+          {analyseAllMutation.isError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {(analyseAllMutation.error as any)?.response?.data?.detail || 'Bulk analysis failed'}
+            </Alert>
           )}
 
           <Grid container spacing={2}>
