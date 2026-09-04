@@ -55,9 +55,8 @@ export default function Layout() {
           flexGrow: 1,
           p: 3,
           mt: '64px',
-          ml: { md: `${DRAWER_WIDTH}px` },
           minHeight: 'calc(100vh - 64px)',
-          maxWidth: '100%',
+          minWidth: 0,
           overflow: 'auto',
         }}
       >
