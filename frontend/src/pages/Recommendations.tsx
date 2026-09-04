@@ -50,7 +50,7 @@ export default function RecommendationsPage() {
   });
 
   const { data: holdings } = useQuery({
-    queryKey: ['portfolio-holdings'],
+    queryKey: ['holdings'],
     queryFn: () => portfolioApi.holdings().then((r) => r.data),
   });
 
@@ -298,8 +298,10 @@ export default function RecommendationsPage() {
 
   // ── Render portfolio recommendations section ──────────────────────────────────
   const renderPortfolioRecs = () => {
+    const holdingSymbols = new Set(holdings?.map((holding) => holding.tradingsymbol) ?? []);
     const allRecs = portfolioRecs
       ? [...portfolioRecs.buy, ...portfolioRecs.add_more, ...portfolioRecs.hold, ...portfolioRecs.partial_sell, ...portfolioRecs.sell, ...portfolioRecs.avoid]
+        .filter((rec) => holdingSymbols.has(rec.stock_symbol))
       : [];
 
     return (

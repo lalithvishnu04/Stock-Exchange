@@ -21,6 +21,7 @@ export const useSignalDetection = (
   const previousRecsRef = useRef<Map<string, Recommendation>>(new Map());
   const alertsRef = useRef<SignalAlert[]>([]);
   const hasNewAlertRef = useRef(false);
+  const initializedRef = useRef(false);
 
   const detectNewSignals = useCallback(() => {
     if (!recommendations) return [];
@@ -32,7 +33,7 @@ export const useSignalDetection = (
       const previousRec = previousRecsRef.current.get(rec.stock_symbol);
       
       // New signal detected
-      if (!previousRec || previousRec.signal !== rec.signal) {
+      if (initializedRef.current && previousRec?.signal !== rec.signal) {
         // Only alert for BUY, SELL, or ADD_MORE signals
         if (['BUY', 'SELL', 'ADD_MORE'].includes(rec.signal)) {
           const alert: SignalAlert = {
@@ -62,6 +63,7 @@ export const useSignalDetection = (
 
     // Update previous recommendations map
     previousRecsRef.current = currentRecs;
+    initializedRef.current = true;
 
     // Keep last 20 alerts
     alertsRef.current = [...alertsRef.current, ...newAlerts].slice(-20);
@@ -74,6 +76,9 @@ export const useSignalDetection = (
   }, []);
 
   useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      void Notification.requestPermission();
+    }
     if (recommendations) {
       detectNewSignals();
     }

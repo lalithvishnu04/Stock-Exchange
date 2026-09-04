@@ -73,6 +73,9 @@ export const useAutoAnalysis = (options: UseAutoAnalysisOptions = {}) => {
       // Invalidate queries to refresh UI
       queryClient.invalidateQueries({ queryKey: ['today-recommendations'] });
       queryClient.invalidateQueries({ queryKey: ['market-picks'] });
+      queryClient.invalidateQueries({ queryKey: ['holdings'] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['allocations'] });
     } catch (error) {
       console.error('Auto-analysis failed:', error);
     }
