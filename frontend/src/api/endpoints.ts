@@ -27,6 +27,7 @@ export const portfolioApi = {
   holdings: () => apiClient.get<Holding[]>('/portfolio/holdings'),
   summary: () => apiClient.get<PortfolioSummary>('/portfolio/summary'),
   allocations: () => apiClient.get<AllocationRulesStatus>('/portfolio/allocations'),
+  sync: () => apiClient.get('/portfolio/sync'),
   alerts: (limit = 50) => apiClient.get<AlertLog[]>(`/portfolio/alerts?limit=${limit}`),
   reports: (limit = 30) => apiClient.get<any[]>(`/portfolio/reports?limit=${limit}`),
   reportContent: (id: number) => apiClient.get<string>(`/portfolio/reports/${id}`),

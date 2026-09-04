@@ -46,7 +46,7 @@ const getMinutesUntilClose = (): number => {
 export const useAutoAnalysis = (options: UseAutoAnalysisOptions = {}) => {
   const { enabled = true, intervalMinutes = 5 } = options;
   const queryClient = useQueryClient();
-  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastPollRef = useRef<number>(0);
 
   const triggerAnalysis = useCallback(async () => {

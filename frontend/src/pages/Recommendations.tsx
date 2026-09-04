@@ -255,7 +255,7 @@ export default function RecommendationsPage() {
                       Confidence: <strong>{rec.confidence_score}%</strong>
                     </Typography>
                     <Typography variant="caption" display="block" color="text.secondary">
-                      Reasoning: {rec.reasoning?.substring(0, 60)}...
+                      Reasoning: {rec.reason?.substring(0, 60)}...
                     </Typography>
                   </CardContent>
                   <Box sx={{ p: 1, pt: 0, display: 'flex', gap: 1 }}>
@@ -450,8 +450,7 @@ export default function RecommendationsPage() {
             value={buyData.average_price}
             onChange={(e) => setBuyData((prev) => ({ ...prev, average_price: parseFloat(e.target.value) || 0 }))}
             fullWidth
-            step="0.01"
-            inputProps={{ min: 0, step: '0.01' }}
+            inputProps={{ min: 0, step: 0.01 }}
           />
           <Typography variant="body2" color="text.secondary">
             Total Investment: ₹{(buyData.quantity * buyData.average_price).toFixed(2)}
@@ -513,9 +512,8 @@ export default function RecommendationsPage() {
             value={addQtyData.newPrice}
             onChange={(e) => setAddQtyData((prev) => ({ ...prev, newPrice: parseFloat(e.target.value) || 0 }))}
             fullWidth
-            step="0.01"
             helperText="Average price per unit"
-            inputProps={{ min: 0, step: '0.01' }}
+            inputProps={{ min: 0, step: 0.01 }}
           />
           <Typography variant="body2" color="text.secondary">
             New Total Investment: ₹{(addQtyData.newQuantity * addQtyData.newPrice).toFixed(2)}
