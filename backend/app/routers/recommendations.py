@@ -1,9 +1,12 @@
 from datetime import datetime, timezone, date
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from typing import Annotated
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from sqlalchemy import select
-from app.core.deps import CurrentUser, DbSession
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.deps import get_current_user, get_db
 from app.models.recommendation import Recommendation
 from app.models.watchlist import Watchlist
+from app.models.user import User
 from app.schemas.recommendation import RecommendationOut, TodayRecommendations, MarketOverview, SectorPerformance, NewsItem, AnalysisRequest
 from app.services.market_data import MarketDataService
 from app.services.sentiment import SentimentService
@@ -15,7 +18,10 @@ _market_svc = MarketDataService()
 
 
 @router.get("/today", response_model=TodayRecommendations)
-async def get_today_recommendations(current_user: CurrentUser, db: DbSession):
+async def get_today_recommendations(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     today_start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
     result = await db.execute(
         select(Recommendation)
@@ -56,8 +62,10 @@ async def get_today_recommendations(current_user: CurrentUser, db: DbSession):
 
 @router.get("/history", response_model=list[RecommendationOut])
 async def get_recommendation_history(
-    current_user: CurrentUser, db: DbSession,
-    limit: int = 100, symbol: str | None = None,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 100,
+    symbol: str | None = None,
 ):
     q = select(Recommendation).where(Recommendation.user_id == current_user.id)
     if symbol:
@@ -71,8 +79,8 @@ async def get_recommendation_history(
 async def analyse_stock(
     payload: AnalysisRequest,
     background_tasks: BackgroundTasks,
-    current_user: CurrentUser,
-    db: DbSession,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Trigger on-demand analysis for a specific stock."""
     from app.models.portfolio import Holding
@@ -94,7 +102,10 @@ async def analyse_stock(
 
 
 @router.post("/analyse-all")
-async def analyse_all_holdings(current_user: CurrentUser, db: DbSession):
+async def analyse_all_holdings(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     """Trigger analysis for all active holdings in the user's portfolio."""
     from app.models.portfolio import Holding
     holdings = (await db.execute(
@@ -122,7 +133,10 @@ async def analyse_all_holdings(current_user: CurrentUser, db: DbSession):
 
 
 @router.get("/market-picks")
-async def get_market_picks(current_user: CurrentUser, db: DbSession):
+async def get_market_picks(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     """Get recommendations for top-performing stocks from Nifty50 (market picks)."""
     # Top Nifty50 stocks as starting list
     TOP_NIFTY50 = [
@@ -231,7 +245,10 @@ class AddToWatchlistRequest(BaseModel):
 
 
 @router.get("/watchlist", response_model=list[WatchlistItem])
-async def get_watchlist(current_user: CurrentUser, db: DbSession):
+async def get_watchlist(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     """Get all watchlist items for the current user."""
     result = await db.execute(
         select(Watchlist)
@@ -242,7 +259,11 @@ async def get_watchlist(current_user: CurrentUser, db: DbSession):
 
 
 @router.post("/watchlist", response_model=WatchlistItem)
-async def add_to_watchlist(payload: AddToWatchlistRequest, current_user: CurrentUser, db: DbSession):
+async def add_to_watchlist(
+    payload: AddToWatchlistRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     """Add a stock to the user's watchlist."""
     # Check if already in watchlist
     existing = await db.execute(
@@ -271,7 +292,11 @@ async def add_to_watchlist(payload: AddToWatchlistRequest, current_user: Current
 
 
 @router.delete("/watchlist/{watchlist_id}")
-async def remove_from_watchlist(watchlist_id: int, current_user: CurrentUser, db: DbSession):
+async def remove_from_watchlist(
+    watchlist_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     """Remove a stock from the watchlist."""
     item = await db.execute(
         select(Watchlist).where(
@@ -289,7 +314,11 @@ async def remove_from_watchlist(watchlist_id: int, current_user: CurrentUser, db
 
 
 @router.put("/watchlist/{watchlist_id}/mark-bought")
-async def mark_as_bought(watchlist_id: int, current_user: CurrentUser, db: DbSession):
+async def mark_as_bought(
+    watchlist_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     """Mark a watchlist item as bought (move to portfolio)."""
     item = await db.execute(
         select(Watchlist).where(
