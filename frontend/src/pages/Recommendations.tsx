@@ -2,21 +2,26 @@ import React, { useState } from 'react';
 import {
   Box, Typography, Card, CardContent, TextField, Button, Grid,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, CircularProgress,
-  Chip, Tab, Tabs,
+  Chip, Tab, Tabs, Divider,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import AddIcon from '@mui/icons-material/Add';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import BookmarkIcon from '@mui/icons-material/Bookmark';
+import DeleteIcon from '@mui/icons-material/Delete';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { recommendationsApi, portfolioApi } from '../api/endpoints';
 import SignalBadge from '../components/common/SignalBadge';
+import { useAutoAnalysis } from '../hooks/useAutoAnalysis';
+import { useSignalDetection } from '../hooks/useSignalDetection';
 import type { Recommendation } from '../types';
 
 export default function RecommendationsPage() {
   const queryClient = useQueryClient();
   const [searchSymbol, setSearchSymbol] = useState('');
-  const [tab, setTab] = useState<'market' | 'portfolio'>('market');
+  const [tab, setTab] = useState<'market' | 'portfolio' | 'watchlist'>('market');
 
   // Buy new stock modal
   const [buyModal, setBuyModal] = useState(false);
@@ -28,20 +33,44 @@ export default function RecommendationsPage() {
   const [addQtyData, setAddQtyData] = useState({ holdingId: 0, newQuantity: 0, newPrice: 0 });
   const [selectedStockForQty, setSelectedStockForQty] = useState<Recommendation | null>(null);
 
+  // ── Auto-Analysis & Signal Detection ──────────────────────────────────────────
+  const { isMarketOpen, minutesUntilClose, triggerAnalysisNow } = useAutoAnalysis({ enabled: true, intervalMinutes: 5 });
+  
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: marketPicks, isLoading: marketLoading } = useQuery({
     queryKey: ['market-picks'],
     queryFn: () => recommendationsApi.marketPicks().then((r) => r.data),
+    refetchInterval: isMarketOpen ? 5 * 60 * 1000 : false, // Auto-refresh every 5 min if market open
   });
 
   const { data: portfolioRecs, isLoading: portfolioLoading } = useQuery({
     queryKey: ['today-recommendations'],
     queryFn: () => recommendationsApi.today().then((r) => r.data),
+    refetchInterval: isMarketOpen ? 5 * 60 * 1000 : false,
   });
 
   const { data: holdings } = useQuery({
     queryKey: ['portfolio-holdings'],
     queryFn: () => portfolioApi.holdings().then((r) => r.data),
+  });
+
+  // Get all recommendations for signal detection
+  const allRecs = portfolioRecs ? [
+    ...portfolioRecs.buy,
+    ...portfolioRecs.add_more,
+    ...portfolioRecs.hold,
+    ...portfolioRecs.partial_sell,
+    ...portfolioRecs.sell,
+    ...portfolioRecs.avoid,
+  ] : [];
+
+  // Signal detection
+  const { recentAlerts, buySignals, sellSignals, addMoreSignals } = useSignalDetection(allRecs, portfolioRecs);
+
+  // Watchlist queries
+  const { data: watchlist, isLoading: watchlistLoading } = useQuery({
+    queryKey: ['watchlist'],
+    queryFn: () => recommendationsApi.getWatchlist().then((r) => r.data),
   });
 
   // ── Mutations ────────────────────────────────────────────────────────────────
@@ -95,6 +124,22 @@ export default function RecommendationsPage() {
       setAddQtyModal(false);
       setAddQtyData({ holdingId: 0, newQuantity: 0, newPrice: 0 });
       setSelectedStockForQty(null);
+    },
+  });
+
+  const addToWatchlistMutation = useMutation({
+    mutationFn: (rec: Recommendation) =>
+      recommendationsApi.addToWatchlist({
+        stock_symbol: rec.stock_symbol,
+        stock_name: rec.stock_name,
+        exchange: rec.exchange || 'NSE',
+        signal: rec.signal,
+        confidence_score: rec.confidence_score,
+        current_price: rec.current_price,
+        target_price: rec.target_price,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['watchlist'] });
     },
   });
 
@@ -213,7 +258,7 @@ export default function RecommendationsPage() {
                       Reasoning: {rec.reasoning?.substring(0, 60)}...
                     </Typography>
                   </CardContent>
-                  <Box sx={{ p: 1, pt: 0 }}>
+                  <Box sx={{ p: 1, pt: 0, display: 'flex', gap: 1 }}>
                     <Button
                       fullWidth
                       size="small"
@@ -231,6 +276,15 @@ export default function RecommendationsPage() {
                       }}
                     >
                       Buy Now
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<BookmarkIcon />}
+                      onClick={() => addToWatchlistMutation.mutate(rec)}
+                      disabled={addToWatchlistMutation.isPending}
+                    >
+                      Watchlist
                     </Button>
                   </Box>
                 </Card>
@@ -483,8 +537,155 @@ export default function RecommendationsPage() {
   );
 
   // ── Main Render ──────────────────────────────────────────────────────────────
+  const renderWatchlist = () => (
+    <Card>
+      <CardContent>
+        <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
+          <BookmarkIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+          My Watchlist ({watchlist?.length || 0})
+        </Typography>
+
+        {watchlistLoading && <Box sx={{ textAlign: 'center', py: 3 }}><CircularProgress /></Box>}
+
+        {!watchlist?.length && !watchlistLoading && (
+          <Alert severity="info">
+            💡 Add recommended stocks to your watchlist. Once you buy, one-click confirmation here!
+          </Alert>
+        )}
+
+        <Grid container spacing={2}>
+          {watchlist?.map((item: any) => (
+            <Grid item xs={12} sm={6} lg={4} key={item.id}>
+              <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <CardContent sx={{ flexGrow: 1 }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                    <Typography variant="h6" fontWeight={700}>
+                      {item.stock_symbol}
+                    </Typography>
+                    <Chip
+                      label={item.signal}
+                      size="small"
+                      color={item.signal === 'SELL' ? 'error' : item.signal === 'BUY' ? 'success' : 'warning'}
+                    />
+                  </Box>
+                  <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                    <Chip label={`₹${item.current_price}`} size="small" variant="outlined" />
+                    <Chip label={`${item.confidence_score}%`} size="small" />
+                  </Box>
+                  <Typography variant="body2" color="text.secondary">
+                    Added: {new Date(item.added_at).toLocaleDateString()}
+                  </Typography>
+                </CardContent>
+                <Divider />
+                <Box sx={{ p: 2, display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    color="success"
+                    fullWidth
+                    onClick={() => {
+                      setSelectedStockForBuy({ ...item, id: 0, reason: '', stock_name: item.stock_symbol });
+                      setBuyData({
+                        symbol: item.stock_symbol,
+                        exchange: item.exchange,
+                        quantity: 1,
+                        average_price: item.current_price,
+                      });
+                      setBuyModal(true);
+                    }}
+                  >
+                    Buy Now
+                  </Button>
+                  <Button
+                    size="small"
+                    color="error"
+                    onClick={() => {
+                      recommendationsApi.removeFromWatchlist(item.id);
+                      queryClient.invalidateQueries({ queryKey: ['watchlist'] });
+                    }}
+                  >
+                    <DeleteIcon />
+                  </Button>
+                </Box>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <Box>
+      {/* Market Status & Recent Alerts */}
+      <Card sx={{ mb: 3, bgcolor: isMarketOpen ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)' }}>
+        <CardContent>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} sm={6}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box
+                  sx={{
+                    width: 12,
+                    height: 12,
+                    borderRadius: '50%',
+                    bgcolor: isMarketOpen ? '#4CAF50' : '#F44336',
+                    animation: isMarketOpen ? 'pulse 2s infinite' : 'none',
+                    '@keyframes pulse': {
+                      '0%, 100%': { opacity: 1 },
+                      '50%': { opacity: 0.5 },
+                    },
+                  }}
+                />
+                <Box>
+                  <Typography variant="subtitle2" fontWeight={700}>
+                    {isMarketOpen ? '🟢 Market OPEN' : '🔴 Market CLOSED'}
+                  </Typography>
+                  {isMarketOpen && (
+                    <Typography variant="caption" color="text.secondary">
+                      ⏱️ {minutesUntilClose} minutes until close (3:30 PM IST)
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            </Grid>
+            {isMarketOpen && (
+              <Grid item xs={12} sm={6} sx={{ textAlign: { xs: 'left', sm: 'right' } }}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={<RefreshIcon />}
+                  onClick={() => triggerAnalysisNow()}
+                >
+                  Refresh Now
+                </Button>
+              </Grid>
+            )}
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Recent Alerts (BUY/SELL Signals) */}
+      {recentAlerts.length > 0 && (
+        <Card sx={{ mb: 3, bgcolor: 'rgba(255, 235, 59, 0.1)', borderLeft: '4px solid #FFC107' }}>
+          <CardContent>
+            <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 2 }}>
+              🚨 Recent Signals (Last {recentAlerts.length})
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              {recentAlerts.slice(-10).map((alert, idx) => (
+                <Chip
+                  key={idx}
+                  label={`${alert.symbol}: ${alert.signal} @ ₹${alert.price}`}
+                  size="small"
+                  color={alert.signal === 'SELL' ? 'error' : alert.signal === 'BUY' ? 'success' : 'warning'}
+                  variant="outlined"
+                />
+              ))}
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
       <Typography variant="h4" sx={{ mb: 3 }}>
         <TrendingUpIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
         Recommendations
@@ -493,10 +694,12 @@ export default function RecommendationsPage() {
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Market Recommendations" value="market" />
         <Tab label="Portfolio Holdings" value="portfolio" />
+        <Tab label={`Watchlist (${watchlist?.length || 0})`} value="watchlist" />
       </Tabs>
 
       {tab === 'market' && renderMarketPicks()}
       {tab === 'portfolio' && renderPortfolioRecs()}
+      {tab === 'watchlist' && renderWatchlist()}
 
       <BuyNewStockModal />
       <AddQuantityModal />

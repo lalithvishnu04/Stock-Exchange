@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # Scheduler
     PRE_MARKET_ANALYSIS_TIME: str = "08:00"
-    INTRADAY_INTERVAL_MINUTES: int = 30
+    INTRADAY_INTERVAL_MINUTES: int = 5  # Auto-analysis every 5 minutes during market hours
     POST_MARKET_ANALYSIS_TIME: str = "16:00"
     DAILY_REPORT_TIME: str = "17:00"
     WEEKLY_REPORT_DAY: str = "friday"

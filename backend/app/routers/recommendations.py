@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from sqlalchemy import select
 from app.core.deps import CurrentUser, DbSession
 from app.models.recommendation import Recommendation
+from app.models.watchlist import Watchlist
 from app.schemas.recommendation import RecommendationOut, TodayRecommendations, MarketOverview, SectorPerformance, NewsItem, AnalysisRequest
 from app.services.market_data import MarketDataService
 from app.services.sentiment import SentimentService
@@ -197,3 +198,110 @@ async def get_market_news(symbol: str | None = None):
     else:
         items = _sentiment_svc.get_market_news()
     return [NewsItem(**n) for n in items]
+
+
+# ========== WATCHLIST ENDPOINTS ==========
+
+from pydantic import BaseModel
+
+class WatchlistItem(BaseModel):
+    id: int
+    stock_symbol: str
+    stock_name: str
+    exchange: str
+    signal: str
+    confidence_score: float
+    current_price: float
+    target_price: float | None
+    added_at: datetime
+    is_bought: bool
+    
+    class Config:
+        from_attributes = True
+
+
+class AddToWatchlistRequest(BaseModel):
+    stock_symbol: str
+    stock_name: str
+    exchange: str = "NSE"
+    signal: str
+    confidence_score: float
+    current_price: float
+    target_price: float | None = None
+
+
+@router.get("/watchlist", response_model=list[WatchlistItem])
+async def get_watchlist(current_user: CurrentUser, db: DbSession):
+    """Get all watchlist items for the current user."""
+    result = await db.execute(
+        select(Watchlist)
+        .where(Watchlist.user_id == current_user.id, Watchlist.is_bought == False)
+        .order_by(Watchlist.confidence_score.desc(), Watchlist.added_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.post("/watchlist", response_model=WatchlistItem)
+async def add_to_watchlist(payload: AddToWatchlistRequest, current_user: CurrentUser, db: DbSession):
+    """Add a stock to the user's watchlist."""
+    # Check if already in watchlist
+    existing = await db.execute(
+        select(Watchlist).where(
+            Watchlist.user_id == current_user.id,
+            Watchlist.stock_symbol == payload.stock_symbol.upper(),
+            Watchlist.is_bought == False,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Already in watchlist")
+    
+    watchlist_item = Watchlist(
+        user_id=current_user.id,
+        stock_symbol=payload.stock_symbol.upper(),
+        stock_name=payload.stock_name,
+        exchange=payload.exchange,
+        signal=payload.signal,
+        confidence_score=payload.confidence_score,
+        current_price=payload.current_price,
+        target_price=payload.target_price,
+    )
+    db.add(watchlist_item)
+    await db.flush()
+    return WatchlistItem.model_validate(watchlist_item)
+
+
+@router.delete("/watchlist/{watchlist_id}")
+async def remove_from_watchlist(watchlist_id: int, current_user: CurrentUser, db: DbSession):
+    """Remove a stock from the watchlist."""
+    item = await db.execute(
+        select(Watchlist).where(
+            Watchlist.id == watchlist_id,
+            Watchlist.user_id == current_user.id,
+        )
+    )
+    watchlist_item = item.scalar_one_or_none()
+    if not watchlist_item:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+    
+    await db.delete(watchlist_item)
+    await db.commit()
+    return {"deleted": True}
+
+
+@router.put("/watchlist/{watchlist_id}/mark-bought")
+async def mark_as_bought(watchlist_id: int, current_user: CurrentUser, db: DbSession):
+    """Mark a watchlist item as bought (move to portfolio)."""
+    item = await db.execute(
+        select(Watchlist).where(
+            Watchlist.id == watchlist_id,
+            Watchlist.user_id == current_user.id,
+        )
+    )
+    watchlist_item = item.scalar_one_or_none()
+    if not watchlist_item:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+    
+    watchlist_item.is_bought = True
+    watchlist_item.bought_at = datetime.now(timezone.utc)
+    await db.commit()
+    return WatchlistItem.model_validate(watchlist_item)

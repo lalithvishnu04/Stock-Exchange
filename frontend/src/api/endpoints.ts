@@ -47,4 +47,9 @@ export const recommendationsApi = {
   sectorPerformance: () => apiClient.get<SectorPerformance[]>('/recommendations/sector-performance'),
   news: (symbol?: string) =>
     apiClient.get<NewsItem[]>(`/recommendations/news${symbol ? `?symbol=${symbol}` : ''}`),
+  // Watchlist endpoints
+  getWatchlist: () => apiClient.get<any[]>('/recommendations/watchlist'),
+  addToWatchlist: (data: any) => apiClient.post('/recommendations/watchlist', data),
+  removeFromWatchlist: (id: number) => apiClient.delete(`/recommendations/watchlist/${id}`),
+  markAsBought: (id: number) => apiClient.put(`/recommendations/watchlist/${id}/mark-bought`, {}),
 };
