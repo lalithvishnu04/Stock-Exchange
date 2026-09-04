@@ -41,6 +41,8 @@ export const recommendationsApi = {
     apiClient.post<Recommendation>('/recommendations/analyse', { symbol, exchange }),
   analyseAll: () =>
     apiClient.post<{ analysed: number; recommendations: Recommendation[] }>('/recommendations/analyse-all'),
+  marketPicks: () =>
+    apiClient.get<Recommendation[]>('/recommendations/market-picks'),
   marketOverview: () => apiClient.get<MarketOverview>('/recommendations/market-overview'),
   sectorPerformance: () => apiClient.get<SectorPerformance[]>('/recommendations/sector-performance'),
   news: (symbol?: string) =>

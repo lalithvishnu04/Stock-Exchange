@@ -120,6 +120,46 @@ async def analyse_all_holdings(current_user: CurrentUser, db: DbSession):
     return {"analysed": len(results), "recommendations": results}
 
 
+@router.get("/market-picks")
+async def get_market_picks(current_user: CurrentUser, db: DbSession):
+    """Get recommendations for top-performing stocks from Nifty50 (market picks)."""
+    # Top Nifty50 stocks as starting list
+    TOP_NIFTY50 = [
+        ("RELIANCE", "NSE"), ("TCS", "NSE"), ("INFY", "NSE"), ("HINDUNILVR", "NSE"),
+        ("ICICIBANK", "NSE"), ("HDFC", "NSE"), ("BAJAJFINSV", "NSE"), ("LT", "NSE"),
+        ("AXISBANK", "NSE"), ("HCLTECH", "NSE"), ("MARUTI", "NSE"), ("KOTAKBANK", "NSE"),
+        ("ITC", "NSE"), ("SUNPHARMA", "NSE"), ("WIPRO", "NSE"), ("POWERGRID", "NSE"),
+        ("ULTRACEMCO", "NSE"), ("ASIANPAINT", "NSE"), ("BAJAJFINSV", "NSE"), ("TATAMOTORS", "NSE"),
+    ]
+    
+    # Get user's current holdings to exclude them
+    from app.models.portfolio import Holding
+    user_holdings = (await db.execute(
+        select(Holding.tradingsymbol).where(
+            Holding.user_id == current_user.id,
+            Holding.is_active == True,
+        )
+    )).scalars().all()
+    holding_symbols = set(s.upper() for s in user_holdings)
+    
+    results = []
+    for symbol, exchange in TOP_NIFTY50:
+        if symbol in holding_symbols:
+            continue  # Skip already holding stocks
+        try:
+            rec = await analyse_stock_for_user(
+                db, current_user, symbol, exchange, holding=None
+            )
+            if rec:
+                results.append(RecommendationOut.model_validate(rec))
+        except Exception:
+            pass
+    
+    # Sort by confidence score and return top 10
+    results.sort(key=lambda r: r.confidence_score, reverse=True)
+    return results[:10]
+
+
 @router.get("/market-overview", response_model=MarketOverview)
 async def get_market_overview():
     data = await _market_svc.get_market_overview()
