@@ -67,28 +67,39 @@ async def analyse_stock_for_user(
 
     current_price = stock_data.get("current_price", 0)
 
-    rec = Recommendation(
-        user_id=user.id,
-        stock_symbol=symbol,
-        stock_name=stock_data.get("company_name", symbol),
-        sector=stock_data.get("sector", "Unknown"),
-        exchange=exchange,
-        signal=RecommendationSignal(rec_data["signal"]),
-        risk_level=RiskLevel(rec_data["risk_level"]),
-        confidence_score=rec_data.get("confidence_score", 50),
-        current_price=current_price,
-        target_price=rec_data.get("target_price"),
-        stop_loss=rec_data.get("stop_loss"),
-        upside_potential=rec_data.get("upside_potential_pct"),
-        reason=rec_data.get("reason", ""),
-        technical_summary=rec_data.get("technical_summary"),
-        fundamental_summary=rec_data.get("fundamental_summary"),
-        sentiment_summary=rec_data.get("sentiment_summary"),
-        portfolio_allocation_pct=portfolio_ctx.get("stock_pct"),
-        sector_allocation_pct=portfolio_ctx.get("sector_pct"),
-        allocation_warning=rec_data.get("allocation_warning"),
-    )
-    db.add(rec)
+    # Upsert: reuse today's existing recommendation for this symbol instead of
+    # inserting a new row every time analysis runs (pre-market/post-market/intraday
+    # polling and manual "analyse" all hit this same symbol repeatedly per day).
+    today_start = datetime.combine(datetime.now(timezone.utc).date(), datetime.min.time()).replace(tzinfo=timezone.utc)
+    existing = (await db.execute(
+        select(Recommendation).where(
+            Recommendation.user_id == user.id,
+            Recommendation.stock_symbol == symbol,
+            Recommendation.is_active == True,
+            Recommendation.created_at >= today_start,
+        )
+    )).scalar_one_or_none()
+
+    rec = existing or Recommendation(user_id=user.id, stock_symbol=symbol)
+    rec.stock_name = stock_data.get("company_name", symbol)
+    rec.sector = stock_data.get("sector", "Unknown")
+    rec.exchange = exchange
+    rec.signal = RecommendationSignal(rec_data["signal"])
+    rec.risk_level = RiskLevel(rec_data["risk_level"])
+    rec.confidence_score = rec_data.get("confidence_score", 50)
+    rec.current_price = current_price
+    rec.target_price = rec_data.get("target_price")
+    rec.stop_loss = rec_data.get("stop_loss")
+    rec.upside_potential = rec_data.get("upside_potential_pct")
+    rec.reason = rec_data.get("reason", "")
+    rec.technical_summary = rec_data.get("technical_summary")
+    rec.fundamental_summary = rec_data.get("fundamental_summary")
+    rec.sentiment_summary = rec_data.get("sentiment_summary")
+    rec.portfolio_allocation_pct = portfolio_ctx.get("stock_pct")
+    rec.sector_allocation_pct = portfolio_ctx.get("sector_pct")
+    rec.allocation_warning = rec_data.get("allocation_warning")
+    if not existing:
+        db.add(rec)
     await db.flush()
 
     # Send alert for BUY/SELL signals
@@ -107,6 +118,57 @@ async def analyse_stock_for_user(
         )
 
     return rec
+
+
+async def refresh_holdings_for_all_users():
+    """Refresh last_price/current_value for every active holding (Yahoo Finance).
+
+    Holding prices were previously only updated via the manual "Refresh Prices"
+    button, so the dashboard would silently drift from real broker prices unless
+    the user clicked it. Scheduler calls this on a cadence to keep them current.
+    """
+    from app.services.zerodha import refresh_prices as _refresh_prices
+
+    async with AsyncSessionLocal() as db:
+        try:
+            users = (await db.execute(select(User).where(User.is_active == True))).scalars().all()
+            for user in users:
+                holdings = (
+                    await db.execute(
+                        select(Holding).where(Holding.user_id == user.id, Holding.is_active == True)
+                    )
+                ).scalars().all()
+                if not holdings:
+                    continue
+
+                raw = [{"tradingsymbol": h.tradingsymbol, "exchange": h.exchange} for h in holdings]
+                refreshed = _refresh_prices(raw)
+                price_map = {r["tradingsymbol"]: r for r in refreshed}
+                now = datetime.now(timezone.utc)
+
+                for h in holdings:
+                    data = price_map.get(h.tradingsymbol)
+                    if not data:
+                        continue
+                    last = data.get("last_price", float(h.last_price))
+                    qty = h.quantity
+                    avg = float(h.average_price)
+                    h.last_price = last
+                    h.close_price = data.get("close_price", float(h.close_price))
+                    h.day_change = data.get("day_change", 0)
+                    h.day_change_pct = data.get("day_change_pct", 0)
+                    h.current_value = last * qty
+                    h.invested_value = avg * qty
+                    h.pnl = float(h.current_value) - float(h.invested_value)
+                    h.pnl_pct = (float(h.pnl) / float(h.invested_value) * 100) if h.invested_value else 0
+                    h.last_synced_at = now
+
+                total = sum(float(h.current_value) for h in holdings) or 1
+                for h in holdings:
+                    h.portfolio_weight_pct = round(float(h.current_value) / total * 100, 3)
+            await db.commit()
+        except Exception:
+            pass
 
 
 async def run_full_analysis_for_all_users(session_type: str = "scheduled"):

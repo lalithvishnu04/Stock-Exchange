@@ -30,9 +30,20 @@ async def get_today_recommendations(
             Recommendation.is_active == True,
             Recommendation.created_at >= today_start,
         )
-        .order_by(Recommendation.confidence_score.desc())
+        .order_by(Recommendation.created_at.desc())
     )
-    recs = result.scalars().all()
+    all_recs = result.scalars().all()
+
+    # Defend against pre-existing duplicate rows (e.g. from before analysis
+    # was made idempotent): keep only the most recent recommendation per symbol.
+    seen_symbols: set[str] = set()
+    recs = []
+    for r in all_recs:
+        if r.stock_symbol in seen_symbols:
+            continue
+        seen_symbols.add(r.stock_symbol)
+        recs.append(r)
+    recs.sort(key=lambda r: float(r.confidence_score), reverse=True)
 
     buy, add_more, hold, partial_sell, sell, avoid = [], [], [], [], [], []
     for r in recs:
@@ -50,7 +61,7 @@ async def get_today_recommendations(
         elif sig == "AVOID":
             avoid.append(r)
 
-    last_updated = recs[0].created_at if recs else None
+    last_updated = all_recs[0].created_at if all_recs else None
     return TodayRecommendations(
         date=date.today().strftime("%d %B %Y"),
         buy=buy, add_more=add_more, hold=hold,

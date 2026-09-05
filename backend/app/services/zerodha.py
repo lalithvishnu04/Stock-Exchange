@@ -24,15 +24,41 @@ def _yf_symbol(symbol: str, exchange: str) -> str:
     return f"{symbol}.NS"   # NSE default
 
 
+def _live_quote(ticker: "yf.Ticker", info: dict) -> tuple[float, float] | None:
+    """Real-time-ish last/previous price from Yahoo's quote endpoint.
+
+    Prefer this over the daily historical 'Close' bar, which can lag a full
+    session behind (Yahoo sometimes hasn't finalized today's bar yet), causing
+    the app's LTP to diverge noticeably from the broker's actual LTP.
+    """
+    try:
+        fast = ticker.fast_info
+        last = fast.get("last_price") or fast.get("lastPrice")
+        prev = fast.get("previous_close") or fast.get("previousClose") or fast.get("regularMarketPreviousClose")
+        if last:
+            return float(last), float(prev) if prev else float(last)
+    except Exception:
+        pass
+    last = info.get("currentPrice") or info.get("regularMarketPrice")
+    prev = info.get("regularMarketPreviousClose") or info.get("previousClose")
+    if last:
+        return float(last), float(prev) if prev else float(last)
+    return None
+
+
 def lookup_stock(symbol: str, exchange: str = "NSE") -> dict | None:
     """Fetch current price + metadata for a symbol. Returns None if not found."""
     ticker = yf.Ticker(_yf_symbol(symbol, exchange))
     info = ticker.info or {}
-    hist = ticker.history(period="2d")
-    if hist.empty:
-        return None
-    last = float(hist["Close"].iloc[-1])
-    prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last
+    quote = _live_quote(ticker, info)
+    if quote:
+        last, prev = quote
+    else:
+        hist = ticker.history(period="2d")
+        if hist.empty:
+            return None
+        last = float(hist["Close"].iloc[-1])
+        prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last
     sector_override = _SECTOR_OVERRIDES.get(symbol.upper())
     return {
         "symbol": symbol.upper(),
@@ -48,26 +74,31 @@ def lookup_stock(symbol: str, exchange: str = "NSE") -> dict | None:
 
 
 def refresh_prices(holdings: list[dict]) -> list[dict]:
-    """Bulk-refresh last_price for a list of {symbol, exchange} dicts using yfinance."""
+    """Refresh last_price for a list of {symbol, exchange} dicts using yfinance.
+
+    Fetches each symbol's live quote individually (fast_info/info) rather than a
+    bulk daily-bar download, since the live quote tracks the broker's actual LTP
+    much more closely than the historical 'Close' column.
+    """
     if not holdings:
         return []
-    symbols = [_yf_symbol(h["tradingsymbol"], h.get("exchange", "NSE")) for h in holdings]
-    try:
-        import pandas as pd
-        raw = yf.download(symbols, period="2d", interval="1d", progress=False, group_by="ticker")
-    except Exception:
-        return holdings
 
     results = []
     for h in holdings:
         yf_sym = _yf_symbol(h["tradingsymbol"], h.get("exchange", "NSE"))
         try:
-            if len(symbols) == 1:
-                df = raw
+            ticker = yf.Ticker(yf_sym)
+            info = ticker.info or {}
+            quote = _live_quote(ticker, info)
+            if quote:
+                last, prev = quote
             else:
-                df = raw[yf_sym]
-            last = float(df["Close"].iloc[-1])
-            prev = float(df["Close"].iloc[-2]) if len(df) > 1 else last
+                hist = ticker.history(period="2d")
+                if hist.empty:
+                    results.append(h)
+                    continue
+                last = float(hist["Close"].iloc[-1])
+                prev = float(hist["Close"].iloc[-2]) if len(hist) > 1 else last
             h["last_price"] = round(last, 2)
             h["close_price"] = round(prev, 2)
             h["day_change"] = round(last - prev, 2)

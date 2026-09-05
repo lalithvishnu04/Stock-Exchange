@@ -65,19 +65,22 @@ def setup_scheduler(app) -> AsyncIOScheduler:
 
 async def _run_pre_market_analysis():
     """Analyse all user holdings before market opens."""
-    from app.services.analysis_runner import run_full_analysis_for_all_users
+    from app.services.analysis_runner import run_full_analysis_for_all_users, refresh_holdings_for_all_users
+    await refresh_holdings_for_all_users()
     await run_full_analysis_for_all_users(session_type="pre_market")
 
 
 async def _run_intraday_analysis():
-    """Light intraday check – look for stop-loss breaches and momentum shifts."""
-    from app.services.analysis_runner import run_intraday_check_for_all_users
+    """Light intraday check – refresh holding prices and look for stop-loss breaches."""
+    from app.services.analysis_runner import run_intraday_check_for_all_users, refresh_holdings_for_all_users
+    await refresh_holdings_for_all_users()
     await run_intraday_check_for_all_users()
 
 
 async def _run_post_market_analysis():
     """Full post-market analysis and alert generation."""
-    from app.services.analysis_runner import run_full_analysis_for_all_users
+    from app.services.analysis_runner import run_full_analysis_for_all_users, refresh_holdings_for_all_users
+    await refresh_holdings_for_all_users()
     await run_full_analysis_for_all_users(session_type="post_market")
 
 

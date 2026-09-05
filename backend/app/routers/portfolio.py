@@ -8,7 +8,7 @@ from app.schemas.portfolio import (
     PortfolioSummary, AllocationRulesStatus, AlertLogOut, ReportOut,
 )
 from app.services.portfolio_analyzer import PortfolioAnalyzer
-from app.services.zerodha import lookup_stock, refresh_prices
+from app.services.zerodha import lookup_stock, refresh_prices, ZerodhaService
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 _portfolio_svc = PortfolioAnalyzer()
