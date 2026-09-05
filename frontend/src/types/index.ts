@@ -2,6 +2,7 @@
 
 export type Signal = 'BUY' | 'ADD_MORE' | 'HOLD' | 'PARTIAL_SELL' | 'SELL' | 'AVOID';
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+export type TradeHorizon = 'INTRADAY' | 'SWING' | 'LONGTERM';
 export type MarketStatus = 'OPEN' | 'CLOSED' | 'PRE_OPEN';
 
 export interface User {
@@ -84,6 +85,7 @@ export interface Recommendation {
   stock_name: string;
   sector: string;
   exchange: string;
+  trade_horizon: TradeHorizon;
   signal: Signal;
   risk_level: RiskLevel;
   confidence_score: number;

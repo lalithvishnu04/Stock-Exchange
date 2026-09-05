@@ -2,7 +2,7 @@ import { apiClient } from './client';
 import type {
   TokenResponse, User, Holding, PortfolioSummary, AllocationRulesStatus,
   TodayRecommendations, Recommendation, MarketOverview, SectorPerformance,
-  NewsItem, AlertLog,
+  NewsItem, AlertLog, TradeHorizon,
 } from '../types';
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -14,6 +14,9 @@ export const authApi = {
   me: () => apiClient.get<User>('/auth/me'),
   updateSettings: (data: Partial<User>) =>
     apiClient.put<User>('/auth/settings', data),
+  zerodhaLoginUrl: () => apiClient.get<{ login_url: string }>('/auth/zerodha/login-url'),
+  zerodhaConnect: (request_token: string) =>
+    apiClient.post<{ message: string; user: string | null }>('/auth/zerodha/connect', { request_token }),
 };
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
@@ -27,7 +30,7 @@ export const portfolioApi = {
   holdings: () => apiClient.get<Holding[]>('/portfolio/holdings'),
   summary: () => apiClient.get<PortfolioSummary>('/portfolio/summary'),
   allocations: () => apiClient.get<AllocationRulesStatus>('/portfolio/allocations'),
-  sync: () => apiClient.get('/portfolio/sync'),
+  sync: () => apiClient.get<{ message: string; count: number }>('/portfolio/sync'),
   alerts: (limit = 50) => apiClient.get<AlertLog[]>(`/portfolio/alerts?limit=${limit}`),
   reports: (limit = 30) => apiClient.get<any[]>(`/portfolio/reports?limit=${limit}`),
   reportContent: (id: number) => apiClient.get<string>(`/portfolio/reports/${id}`),
@@ -35,15 +38,16 @@ export const portfolioApi = {
 
 // ── Recommendations ───────────────────────────────────────────────────────────
 export const recommendationsApi = {
-  today: () => apiClient.get<TodayRecommendations>('/recommendations/today'),
+  today: (horizon?: TradeHorizon) =>
+    apiClient.get<TodayRecommendations>(`/recommendations/today${horizon ? `?horizon=${horizon}` : ''}`),
   history: (limit = 100, symbol?: string) =>
     apiClient.get<Recommendation[]>(`/recommendations/history?limit=${limit}${symbol ? `&symbol=${symbol}` : ''}`),
-  analyse: (symbol: string, exchange = 'NSE') =>
-    apiClient.post<Recommendation>('/recommendations/analyse', { symbol, exchange }),
-  analyseAll: () =>
-    apiClient.post<{ analysed: number; recommendations: Recommendation[] }>('/recommendations/analyse-all'),
-  marketPicks: () =>
-    apiClient.get<Recommendation[]>('/recommendations/market-picks'),
+  analyse: (symbol: string, exchange = 'NSE', horizon: TradeHorizon = 'SWING') =>
+    apiClient.post<Recommendation>('/recommendations/analyse', { symbol, exchange, horizon }),
+  analyseAll: (horizon: TradeHorizon = 'SWING') =>
+    apiClient.post<{ analysed: number; recommendations: Recommendation[] }>(`/recommendations/analyse-all?horizon=${horizon}`),
+  marketPicks: (horizon: TradeHorizon = 'SWING') =>
+    apiClient.get<Recommendation[]>(`/recommendations/market-picks?horizon=${horizon}`),
   marketOverview: () => apiClient.get<MarketOverview>('/recommendations/market-overview'),
   sectorPerformance: () => apiClient.get<SectorPerformance[]>('/recommendations/sector-performance'),
   news: (symbol?: string) =>

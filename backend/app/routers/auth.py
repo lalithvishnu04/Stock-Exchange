@@ -86,6 +86,16 @@ async def update_settings(payload: UserSettingsUpdate, current_user: CurrentUser
     return _user_out(current_user)
 
 
+@router.get("/zerodha/login-url")
+async def get_zerodha_login_url(current_user: CurrentUser):
+    if not current_user.zerodha_api_key:
+        raise HTTPException(status_code=400, detail="Save your Zerodha API key first via Settings")
+
+    from app.services.zerodha import ZerodhaService
+    svc = ZerodhaService(current_user.zerodha_api_key, current_user.zerodha_api_secret or "")
+    return {"login_url": svc.login_url()}
+
+
 @router.post("/zerodha/connect")
 async def connect_zerodha(payload: ZerodhaConnectRequest, current_user: CurrentUser, db: DbSession):
     if not current_user.zerodha_api_key or not current_user.zerodha_api_secret:

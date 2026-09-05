@@ -21,6 +21,12 @@ class RiskLevel(str, enum.Enum):
     HIGH = "HIGH"
 
 
+class TradeHorizon(str, enum.Enum):
+    INTRADAY = "INTRADAY"   # same-day entry/exit
+    SWING = "SWING"         # multi-day to multi-week hold
+    LONGTERM = "LONGTERM"   # multi-month+ hold, fundamentals-weighted
+
+
 class Recommendation(Base):
     __tablename__ = "recommendations"
 
@@ -31,6 +37,7 @@ class Recommendation(Base):
     sector: Mapped[str] = mapped_column(String(100), nullable=False)
     exchange: Mapped[str] = mapped_column(String(10), default="NSE")
 
+    trade_horizon: Mapped[TradeHorizon] = mapped_column(Enum(TradeHorizon), default=TradeHorizon.SWING, nullable=False)
     signal: Mapped[RecommendationSignal] = mapped_column(Enum(RecommendationSignal), nullable=False)
     risk_level: Mapped[RiskLevel] = mapped_column(Enum(RiskLevel), nullable=False)
     confidence_score: Mapped[float] = mapped_column(Numeric(5, 2), default=0.0)

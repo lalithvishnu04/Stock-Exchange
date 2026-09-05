@@ -9,9 +9,20 @@ from ta.volatility import BollingerBands
 
 class TechnicalAnalysisService:
 
-    def analyze(self, ohlcv: dict) -> dict:
+    # Horizon → indicator windows. Intraday uses short windows tuned to 15-min
+    # candles, swing uses the classic daily 20/50 setup, long-term uses weekly
+    # candles so the "moving averages" span months rather than weeks.
+    _HORIZON_PARAMS = {
+        "INTRADAY": {"rsi_window": 9, "sma_fast": 9, "sma_slow": 21},
+        "SWING": {"rsi_window": 14, "sma_fast": 20, "sma_slow": 50},
+        "LONGTERM": {"rsi_window": 14, "sma_fast": 10, "sma_slow": 30},
+    }
+
+    def analyze(self, ohlcv: dict, horizon: str = "SWING") -> dict:
         """ohlcv: dict with lists of open/high/low/close/volume."""
-        if not ohlcv or len(ohlcv.get("close", [])) < 20:
+        params = self._HORIZON_PARAMS.get(horizon, self._HORIZON_PARAMS["SWING"])
+        min_bars = max(params["sma_slow"], params["rsi_window"]) + 5
+        if not ohlcv or len(ohlcv.get("close", [])) < min_bars:
             return {"error": "Insufficient data"}
 
         df = pd.DataFrame({
@@ -25,12 +36,12 @@ class TechnicalAnalysisService:
         c = df["close"]
 
         # ── Moving Averages ──────────────────────────────────────────
-        sma20 = float(SMAIndicator(c, window=20).sma_indicator().iloc[-1] or c.iloc[-1])
-        sma50 = float(SMAIndicator(c, window=50).sma_indicator().iloc[-1] or c.iloc[-1])
-        ema20 = float(EMAIndicator(c, window=20).ema_indicator().iloc[-1] or c.iloc[-1])
+        sma20 = float(SMAIndicator(c, window=params["sma_fast"]).sma_indicator().iloc[-1] or c.iloc[-1])
+        sma50 = float(SMAIndicator(c, window=params["sma_slow"]).sma_indicator().iloc[-1] or c.iloc[-1])
+        ema20 = float(EMAIndicator(c, window=params["sma_fast"]).ema_indicator().iloc[-1] or c.iloc[-1])
 
         # ── Momentum ─────────────────────────────────────────────────
-        rsi = float(RSIIndicator(c, window=14).rsi().iloc[-1] or 50)
+        rsi = float(RSIIndicator(c, window=params["rsi_window"]).rsi().iloc[-1] or 50)
         _macd = MACD(c, window_fast=12, window_slow=26, window_sign=9)
         macd_val    = float(_macd.macd().iloc[-1] or 0)
         macd_signal = float(_macd.macd_signal().iloc[-1] or 0)
@@ -92,10 +103,25 @@ class TechnicalAnalysisService:
         # ADX trend strength
         trend_strength = "Strong" if adx > 25 else "Weak"
 
-        # ── Support / Resistance (20-day range) ──────────────────────
+        # ── Support / Resistance (recent range) ───────────────────────
         recent = df.tail(20)
         support = float(recent["low"].min())
         resistance = float(recent["high"].max())
+
+        # ── VWAP (intraday only) — session volume-weighted average price ──
+        vwap = None
+        if horizon == "INTRADAY":
+            last_day = df.index[-1].date()
+            session = df[df.index.date == last_day]
+            if not session.empty and session["volume"].sum() > 0:
+                typical = (session["high"] + session["low"] + session["close"]) / 3
+                vwap = float((typical * session["volume"]).cumsum().iloc[-1] / session["volume"].cumsum().iloc[-1])
+                if close > vwap:
+                    signals.append("Price above session VWAP")
+                    bullish_count += 1
+                elif close < vwap:
+                    signals.append("Price below session VWAP")
+                    bearish_count += 1
 
         # ── Overall technical sentiment ───────────────────────────────
         if bullish_count > bearish_count + 1:
@@ -110,6 +136,7 @@ class TechnicalAnalysisService:
         volatility = float(returns.std() * np.sqrt(252) * 100)
 
         return {
+            "horizon": horizon,
             "overall": overall,
             "rsi": round(rsi, 2),
             "macd": round(macd_val, 4),
@@ -120,6 +147,7 @@ class TechnicalAnalysisService:
             "ema20": round(ema20, 2),
             "bb_upper": round(bb_upper, 2),
             "bb_lower": round(bb_lower, 2),
+            "vwap": round(vwap, 2) if vwap is not None else None,
             "adx": round(adx, 2),
             "trend_strength": trend_strength,
             "support": round(support, 2),

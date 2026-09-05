@@ -9,6 +9,7 @@ import PortfolioPage from './pages/Portfolio';
 import RecommendationsPage from './pages/Recommendations';
 import ReportsPage from './pages/Reports';
 import SettingsPage from './pages/Settings';
+import ZerodhaCallbackPage from './pages/ZerodhaCallback';
 
 const darkTheme = createTheme({
   palette: {
@@ -52,6 +53,14 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/zerodha/callback"
+            element={
+              <ProtectedRoute>
+                <ZerodhaCallbackPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/"
             element={

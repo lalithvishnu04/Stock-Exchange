@@ -83,6 +83,20 @@ services:
       - backend
       - frontend
 
+  # Cloudflare Tunnel — exposes nginx (frontend+backend) at your Cloudflare
+  # domain with no port-forwarding and no local install needed on client devices.
+  # Requires CLOUDFLARE_TUNNEL_TOKEN in .env (from Cloudflare Zero Trust dashboard
+  # → Networks → Tunnels → Create a tunnel → Docker connector).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: stock_advisor_cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - nginx
+
 volumes:
   postgres_data:
   redis_data:

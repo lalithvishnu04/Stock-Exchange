@@ -38,6 +38,17 @@ SECTOR_ETF_MAP = {
 _mem_cache: dict = {}
 
 
+# Horizon → (history period, candle interval) used for fetching OHLCV data.
+# Intraday needs intraday candles (yfinance caps 15m interval history at ~60 days,
+# 5d is plenty for RSI-9/VWAP); swing uses daily candles; long-term uses weekly
+# candles over a longer lookback so trend/fundamental context dominates.
+HORIZON_FETCH_PARAMS = {
+    "INTRADAY": {"period": "5d", "interval": "15m"},
+    "SWING": {"period": "6mo", "interval": "1d"},
+    "LONGTERM": {"period": "5y", "interval": "1wk"},
+}
+
+
 class MarketDataService:
     def __init__(self):
         self.ttl = settings.CACHE_TTL_SECONDS
@@ -98,15 +109,16 @@ class MarketDataService:
         symbol: str,
         exchange: str = "NSE",
         period: str = "1y",
+        interval: str = "1d",
     ) -> dict:
-        key = f"stock:{symbol}:{exchange}:{period}"
+        key = f"stock:{symbol}:{exchange}:{period}:{interval}"
         cached = await self._get_cached(key)
         if cached:
             return cached
 
         yf_sym = to_yf_symbol(symbol, exchange)
         ticker = yf.Ticker(yf_sym)
-        hist = ticker.history(period=period)
+        hist = ticker.history(period=period, interval=interval)
         info = ticker.info or {}
 
         if hist.empty:
@@ -139,7 +151,7 @@ class MarketDataService:
             "revenue_growth": info.get("revenueGrowth"),
             "earnings_growth": info.get("earningsGrowth"),
             "ohlcv": {
-                "dates": hist.index.strftime("%Y-%m-%d").tolist(),
+                "dates": hist.index.strftime("%Y-%m-%d %H:%M:%S").tolist(),
                 "open": hist["Open"].round(2).tolist(),
                 "high": hist["High"].round(2).tolist(),
                 "low": hist["Low"].round(2).tolist(),
@@ -149,6 +161,11 @@ class MarketDataService:
         }
         await self._set_cache(key, data)
         return data
+
+    async def get_stock_data_for_horizon(self, symbol: str, exchange: str, horizon: str) -> dict:
+        """Fetch OHLCV using the candle period/interval appropriate for a trade horizon."""
+        params = HORIZON_FETCH_PARAMS.get(horizon, HORIZON_FETCH_PARAMS["SWING"])
+        return await self.get_stock_data(symbol, exchange, period=params["period"], interval=params["interval"])
 
     async def get_sector_performance(self) -> list[dict]:
         cached = await self._get_cached("market:sectors")

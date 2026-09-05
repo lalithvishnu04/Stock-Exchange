@@ -114,19 +114,39 @@ def get_zerodha_service(api_key: str, api_secret: str) -> "ZerodhaService":
 
 
 class ZerodhaService:
-    """Stub — no live Zerodha API; uses yfinance for market data."""
+    """Zerodha Kite Connect integration — read-only usage: login + holdings sync only.
+
+    No order placement is ever called from this service, matching the app's
+    "view and recommend, never auto-trade" design.
+    """
 
     def __init__(self, api_key: str, api_secret: str):
+        from kiteconnect import KiteConnect
+
         self.api_key = api_key
         self.api_secret = api_secret
+        self._kite = KiteConnect(api_key=api_key)
         self._access_token: str | None = None
+
+    def login_url(self) -> str:
+        """URL to send the user's browser to for the Kite login/consent flow."""
+        return self._kite.login_url()
 
     def set_access_token(self, token: str) -> None:
         self._access_token = token
-
-    def get_holdings(self) -> list[dict]:
-        """Returns empty list — live Zerodha holdings require a valid access token."""
-        return []
+        self._kite.set_access_token(token)
 
     def generate_session(self, request_token: str) -> dict:
-        raise NotImplementedError("Live Zerodha session not supported; configure API credentials in Zerodha developer console.")
+        """Exchange a one-time request_token (from the login redirect) for an access_token."""
+        data = self._kite.generate_session(request_token, api_secret=self.api_secret)
+        self.set_access_token(data["access_token"])
+        return data
+
+    def get_holdings(self) -> list[dict]:
+        """Fetch real holdings from the connected Zerodha account."""
+        if not self._access_token:
+            return []
+        try:
+            return self._kite.holdings()
+        except Exception:
+            return []

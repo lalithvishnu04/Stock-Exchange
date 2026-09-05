@@ -25,7 +25,10 @@ export default function SettingsPage() {
     onSuccess: (res) => { setUser(res.data); setSaved(true); setTimeout(() => setSaved(false), 3000); },
   });
 
-  const zerodhaLoginUrl = `${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/zerodha/login-url`;
+  const zerodhaAuthMutation = useMutation({
+    mutationFn: () => authApi.zerodhaLoginUrl(),
+    onSuccess: (res) => { window.open(res.data.login_url, '_blank'); },
+  });
 
   return (
     <Box>
@@ -119,9 +122,19 @@ export default function SettingsPage() {
                 </Grid>
               </Grid>
 
-              <Button variant="outlined" sx={{ mt: 2 }} onClick={() => window.open(zerodhaLoginUrl, '_blank')}>
-                Authorize with Zerodha
+              <Button
+                variant="outlined"
+                sx={{ mt: 2 }}
+                disabled={zerodhaAuthMutation.isPending}
+                onClick={() => zerodhaAuthMutation.mutate()}
+              >
+                {zerodhaAuthMutation.isPending ? <CircularProgress size={16} /> : 'Authorize with Zerodha'}
               </Button>
+              {zerodhaAuthMutation.isError && (
+                <Alert severity="error" sx={{ mt: 1 }}>
+                  {(zerodhaAuthMutation.error as any)?.response?.data?.detail || 'Save your API key/secret first'}
+                </Alert>
+              )}
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
                 After authorizing, you'll be redirected back to the app. Your holdings will be synced automatically.
               </Typography>

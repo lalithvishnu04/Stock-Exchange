@@ -19,9 +19,39 @@ IMPORTANT RULES (MUST FOLLOW):
 5. Always assess risk: LOW (stable, low-volatility blue chip), MEDIUM (moderate volatility, some debt), HIGH (high volatility, speculative).
 6. Recommendations must be one of: BUY, ADD_MORE, HOLD, PARTIAL_SELL, SELL, AVOID.
 7. If there is any doubt, recommend HOLD over BUY. Protect capital first.
+8. NEVER recommend BUY for a stock the user already holds ("current_holding" is not null) —
+   use HOLD, ADD_MORE, PARTIAL_SELL, or SELL instead. BUY is reserved for new positions only,
+   so existing holdings are never disturbed by a fresh buy suggestion.
 
 Respond ONLY with valid JSON in the exact format specified.
 """
+
+# Guidance injected per trade horizon so the same model adapts its reasoning
+# instead of always producing swing-trade-style advice.
+HORIZON_GUIDANCE = {
+    "INTRADAY": (
+        "Trade horizon: INTRADAY (same trading day only, position must close before market close). "
+        "Prioritize price action, RSI-9, VWAP, and volume over fundamentals. Target/stop-loss must be tight "
+        "(1-3% moves). Ignore long-term fundamentals almost entirely."
+    ),
+    "SWING": (
+        "Trade horizon: SWING (hold for a few days to a few weeks). "
+        "Balance technical momentum (RSI-14, MACD, moving averages) with fundamentals. "
+        "Target/stop-loss should reflect a multi-day move (5-15%)."
+    ),
+    "LONGTERM": (
+        "Trade horizon: LONG-TERM (hold for months to years). "
+        "Weight fundamentals (growth, ROE, debt, valuation) and sector trend far more than short-term technicals. "
+        "Target/stop-loss should reflect a large multi-month move (20%+ upside, wider stop-loss)."
+    ),
+}
+
+# Horizon → target/stop-loss move size and scoring weights for the rule-based fallback.
+_HORIZON_PROFILE = {
+    "INTRADAY": {"target_pct": 0.02, "stop_pct": 0.01, "tech_weight": 1.5, "fund_weight": 0.0, "sent_weight": 0.3},
+    "SWING": {"target_pct": 0.12, "stop_pct": 0.05, "tech_weight": 1.0, "fund_weight": 1.0, "sent_weight": 1.0},
+    "LONGTERM": {"target_pct": 0.25, "stop_pct": 0.15, "tech_weight": 0.4, "fund_weight": 2.0, "sent_weight": 0.5},
+}
 
 RECOMMENDATION_SCHEMA = {
     "signal": "string: one of BUY, ADD_MORE, HOLD, PARTIAL_SELL, SELL, AVOID",
@@ -44,12 +74,14 @@ async def generate_recommendation(
     sentiment_agg: dict,
     holding: Optional[dict] = None,
     portfolio_context: Optional[dict] = None,
+    horizon: str = "SWING",
 ) -> dict:
     """Call OpenAI to generate a recommendation, fall back to rule-based if no API key."""
     if not client:
-        return _rule_based_recommendation(stock_data, technical, fundamental, sentiment_agg, holding, portfolio_context)
+        return _rule_based_recommendation(stock_data, technical, fundamental, sentiment_agg, holding, portfolio_context, horizon)
 
     context = {
+        "trade_horizon": horizon,
         "stock": {
             "symbol": stock_data.get("symbol"),
             "company": stock_data.get("company_name"),
@@ -96,11 +128,12 @@ async def generate_recommendation(
         f"Respond ONLY with JSON matching this schema:\n{json.dumps(RECOMMENDATION_SCHEMA, indent=2)}"
     )
 
+    system_prompt = f"{SYSTEM_PROMPT}\n{HORIZON_GUIDANCE.get(horizon, HORIZON_GUIDANCE['SWING'])}"
     try:
         response = await client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_msg},
             ],
             response_format={"type": "json_object"},
@@ -108,15 +141,36 @@ async def generate_recommendation(
             max_tokens=800,
         )
         result = json.loads(response.choices[0].message.content)
-        return _validate_and_apply_rules(result, portfolio_context)
+        return _validate_and_apply_rules(result, portfolio_context, holding)
     except Exception as e:
-        return _rule_based_recommendation(stock_data, technical, fundamental, sentiment_agg, holding, portfolio_context)
+        return _rule_based_recommendation(stock_data, technical, fundamental, sentiment_agg, holding, portfolio_context, horizon)
 
 
-def _validate_and_apply_rules(result: dict, portfolio_context: Optional[dict]) -> dict:
-    """Enforce portfolio rules on AI output."""
+def _validate_and_apply_rules(
+    result: dict, portfolio_context: Optional[dict], holding: Optional[dict] = None
+) -> dict:
+    """Enforce portfolio rules on AI output.
+
+    Also enforces the "don't disturb existing holdings" rule: BUY is only ever
+    valid for stocks you don't already own, and SELL/PARTIAL_SELL only make
+    sense for stocks you do own.
+    """
     signal = result.get("signal", "HOLD")
     warnings = []
+
+    if holding:
+        if signal == "BUY" or (signal == "ADD_MORE" and not settings.ALLOW_ADD_MORE_ON_HOLDINGS):
+            warnings.append(
+                "Already holding this stock; averaging-in is disabled "
+                "(set ALLOW_ADD_MORE_ON_HOLDINGS=true to allow it)."
+                if signal == "ADD_MORE"
+                else "Already holding this stock; 'BUY' only applies to new positions."
+            )
+            signal = "HOLD"
+    else:
+        if signal in ("SELL", "PARTIAL_SELL", "ADD_MORE"):
+            warnings.append("Not currently held; treating exit/add-more signal as AVOID.")
+            signal = "AVOID"
 
     if portfolio_context:
         stock_pct = portfolio_context.get("stock_pct", 0)
@@ -148,12 +202,18 @@ def _rule_based_recommendation(
     sentiment_agg: dict,
     holding: Optional[dict],
     portfolio_context: Optional[dict],
+    horizon: str = "SWING",
 ) -> dict:
     """Fallback rule-based engine when OpenAI is unavailable."""
+    profile = _HORIZON_PROFILE.get(horizon, _HORIZON_PROFILE["SWING"])
     tech_score = technical.get("bullish_score", 0) - technical.get("bearish_score", 0)
     fund_score = fundamental.get("score", 0)
     sent_score = 1 if sentiment_agg.get("overall") == "POSITIVE" else (-1 if sentiment_agg.get("overall") == "NEGATIVE" else 0)
-    total = tech_score + fund_score + sent_score
+    total = (
+        tech_score * profile["tech_weight"]
+        + fund_score * profile["fund_weight"]
+        + sent_score * profile["sent_weight"]
+    )
 
     volatility = technical.get("volatility_annualised_pct", 25)
     beta = stock_data.get("beta")
@@ -176,8 +236,8 @@ def _rule_based_recommendation(
         reason = "Significant bearish signals across multiple indicators. Recommend exit."
 
     current_price = stock_data.get("current_price", 0)
-    target = round(current_price * 1.15, 2) if signal in ("BUY", "ADD_MORE") else None
-    stop_loss = round(current_price * 0.93, 2) if signal in ("BUY", "ADD_MORE") else None
+    target = round(current_price * (1 + profile["target_pct"]), 2) if signal in ("BUY", "ADD_MORE") else None
+    stop_loss = round(current_price * (1 - profile["stop_pct"]), 2) if signal in ("BUY", "ADD_MORE") else None
 
     result = {
         "signal": signal,
@@ -193,7 +253,7 @@ def _rule_based_recommendation(
         "sentiment_summary": f"News sentiment is {sentiment_agg.get('overall', 'NEUTRAL')}.",
         "allocation_warning": None,
     }
-    return _validate_and_apply_rules(result, portfolio_context)
+    return _validate_and_apply_rules(result, portfolio_context, holding)
 
 
 def _calc_risk(volatility: float, beta: float | None) -> str:

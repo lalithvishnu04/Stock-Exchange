@@ -88,6 +88,11 @@ export default function PortfolioPage() {
     onSuccess: () => invalidate(),
   });
 
+  const syncMutation = useMutation({
+    mutationFn: () => portfolioApi.sync(),
+    onSuccess: () => invalidate(),
+  });
+
   const openEdit = (h: Holding) => {
     setEditHolding(h);
     setForm({ tradingsymbol: h.tradingsymbol, exchange: h.exchange, quantity: String(h.quantity), average_price: String(h.average_price) });
@@ -104,10 +109,18 @@ export default function PortfolioPage() {
         <Box>
           <Typography variant="h4">My Portfolio</Typography>
           <Typography variant="body2" color="text.secondary">
-            Add your Zerodha holdings here. Prices auto-refresh from Yahoo Finance (free).
+            Sync from Zerodha (Settings → Zerodha Integration) or add holdings manually. Prices auto-refresh from Yahoo Finance (free).
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', gap: 1 }}>
+          <Button
+            variant="outlined"
+            startIcon={syncMutation.isPending ? <CircularProgress size={16} /> : <SyncIcon />}
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+          >
+            Sync from Zerodha
+          </Button>
           <Button
             variant="outlined"
             startIcon={refreshMutation.isPending ? <CircularProgress size={16} /> : <RefreshIcon />}
@@ -121,6 +134,18 @@ export default function PortfolioPage() {
           </Button>
         </Box>
       </Box>
+
+      {syncMutation.isSuccess && (
+        <Alert severity={syncMutation.data.data.count > 0 ? 'success' : 'info'} sx={{ mb: 2 }} onClose={() => syncMutation.reset()}>
+          {syncMutation.data.data.message}
+        </Alert>
+      )}
+
+      {syncMutation.isError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => syncMutation.reset()}>
+          {(syncMutation.error as any)?.response?.data?.detail || 'Zerodha sync failed. Connect Zerodha in Settings first.'}
+        </Alert>
+      )}
 
       {refreshMutation.isSuccess && (
         <Alert severity="success" sx={{ mb: 2 }} onClose={() => refreshMutation.reset()}>
@@ -139,8 +164,8 @@ export default function PortfolioPage() {
 
       {(!holdings || holdings.length === 0) && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          No stocks added yet. Click <strong>"Add Stock"</strong> and enter your Zerodha holdings manually.
-          You only need to do this once — prices update automatically every day.
+          No stocks added yet. Click <strong>"Sync from Zerodha"</strong> if you've connected your account in Settings,
+          or <strong>"Add Stock"</strong> to enter holdings manually.
         </Alert>
       )}
 

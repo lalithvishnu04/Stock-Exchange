@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     # Portfolio Rules
     MAX_SINGLE_STOCK_ALLOCATION: float = 10.0   # percent
     MAX_SINGLE_SECTOR_ALLOCATION: float = 25.0  # percent
+    ALLOW_ADD_MORE_ON_HOLDINGS: bool = False  # if false, existing holdings never get a BUY/ADD_MORE signal
 
     # Scheduler
     PRE_MARKET_ANALYSIS_TIME: str = "08:00"

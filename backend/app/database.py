@@ -47,3 +47,20 @@ async def create_tables() -> None:
             await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
             await conn.exec_driver_sql("PRAGMA busy_timeout=30000")
         await conn.run_sync(Base.metadata.create_all)
+        if _is_sqlite:
+            await _add_missing_columns(conn)
+
+
+# (table, column, DDL type) additions for existing SQLite databases — there's no
+# Alembic here, so new columns on pre-existing tables need a manual ADD COLUMN.
+_SQLITE_COLUMN_ADDITIONS = [
+    ("recommendations", "trade_horizon", "VARCHAR(20) NOT NULL DEFAULT 'SWING'"),
+]
+
+
+async def _add_missing_columns(conn) -> None:
+    for table, column, ddl_type in _SQLITE_COLUMN_ADDITIONS:
+        result = await conn.exec_driver_sql(f"PRAGMA table_info({table})")
+        existing_columns = {row[1] for row in result.fetchall()}
+        if column not in existing_columns:
+            await conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")

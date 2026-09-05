@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_current_user, get_db
-from app.models.recommendation import Recommendation
+from app.models.recommendation import Recommendation, TradeHorizon
 from app.models.watchlist import Watchlist
 from app.models.user import User
 from app.schemas.recommendation import RecommendationOut, TodayRecommendations, MarketOverview, SectorPerformance, NewsItem, AnalysisRequest
@@ -21,15 +21,19 @@ _market_svc = MarketDataService()
 async def get_today_recommendations(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    horizon: str | None = None,
 ):
     today_start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
+    conditions = [
+        Recommendation.user_id == current_user.id,
+        Recommendation.is_active == True,
+        Recommendation.created_at >= today_start,
+    ]
+    if horizon:
+        conditions.append(Recommendation.trade_horizon == TradeHorizon(horizon.upper()))
     result = await db.execute(
         select(Recommendation)
-        .where(
-            Recommendation.user_id == current_user.id,
-            Recommendation.is_active == True,
-            Recommendation.created_at >= today_start,
-        )
+        .where(*conditions)
         .order_by(Recommendation.created_at.desc())
     )
     all_recs = result.scalars().all()
@@ -105,7 +109,7 @@ async def analyse_stock(
 
     rec = await analyse_stock_for_user(
         db, current_user,
-        payload.symbol.upper(), payload.exchange, holding
+        payload.symbol.upper(), payload.exchange, holding, payload.horizon.value
     )
     if not rec:
         raise HTTPException(status_code=404, detail="Could not fetch data for this symbol")
@@ -116,6 +120,7 @@ async def analyse_stock(
 async def analyse_all_holdings(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    horizon: str = "SWING",
 ):
     """Trigger analysis for all active holdings in the user's portfolio."""
     from app.models.portfolio import Holding
@@ -131,7 +136,7 @@ async def analyse_all_holdings(
         try:
             rec = await analyse_stock_for_user(
                 db, current_user,
-                holding.tradingsymbol, holding.exchange, holding
+                holding.tradingsymbol, holding.exchange, holding, horizon.upper()
             )
             if rec:
                 results.append(RecommendationOut.model_validate(rec))
@@ -147,8 +152,13 @@ async def analyse_all_holdings(
 async def get_market_picks(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    horizon: str = "SWING",
 ):
-    """Get recommendations for top-performing stocks from Nifty50 (market picks)."""
+    """Get recommendations for top-performing stocks from Nifty50 (market picks).
+
+    Only ever considers stocks the user doesn't already hold, so these are
+    always "new buy" candidates for the given trade horizon.
+    """
     # Top Nifty50 stocks as starting list
     TOP_NIFTY50 = [
         ("RELIANCE", "NSE"), ("TCS", "NSE"), ("INFY", "NSE"), ("HINDUNILVR", "NSE"),
@@ -174,7 +184,7 @@ async def get_market_picks(
             continue  # Skip already holding stocks
         try:
             rec = await analyse_stock_for_user(
-                db, current_user, symbol, exchange, holding=None
+                db, current_user, symbol, exchange, holding=None, horizon=horizon.upper()
             )
             if rec:
                 results.append(RecommendationOut.model_validate(rec))

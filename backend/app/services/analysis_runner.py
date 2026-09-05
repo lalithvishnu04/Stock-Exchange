@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.database import AsyncSessionLocal
 from app.models.user import User
 from app.models.portfolio import Holding
-from app.models.recommendation import Recommendation, RecommendationSignal, RiskLevel
+from app.models.recommendation import Recommendation, RecommendationSignal, RiskLevel, TradeHorizon
 from app.services.market_data import MarketDataService
 from app.services.technical_analysis import TechnicalAnalysisService
 from app.services.fundamental_analysis import FundamentalAnalysisService
@@ -28,15 +28,16 @@ async def analyse_stock_for_user(
     symbol: str,
     exchange: str = "NSE",
     holding: Holding | None = None,
+    horizon: str = "SWING",
 ) -> Recommendation | None:
-    # Fetch market data
-    stock_data = await _market_svc.get_stock_data(symbol, exchange)
+    # Fetch market data using candles appropriate for this trade horizon
+    stock_data = await _market_svc.get_stock_data_for_horizon(symbol, exchange, horizon)
     if not stock_data:
         return None
 
     # Technical analysis
     ohlcv = stock_data.get("ohlcv", {})
-    technical = _technical_svc.analyze(ohlcv)
+    technical = _technical_svc.analyze(ohlcv, horizon)
 
     # Fundamental analysis
     fundamental = _fundamental_svc.analyze(stock_data)
@@ -62,12 +63,12 @@ async def analyse_stock_for_user(
 
     # AI recommendation
     rec_data = await generate_recommendation(
-        stock_data, technical, fundamental, sentiment_agg, holding_dict, portfolio_ctx
+        stock_data, technical, fundamental, sentiment_agg, holding_dict, portfolio_ctx, horizon
     )
 
     current_price = stock_data.get("current_price", 0)
 
-    # Upsert: reuse today's existing recommendation for this symbol instead of
+    # Upsert: reuse today's existing recommendation for this symbol+horizon instead of
     # inserting a new row every time analysis runs (pre-market/post-market/intraday
     # polling and manual "analyse" all hit this same symbol repeatedly per day).
     today_start = datetime.combine(datetime.now(timezone.utc).date(), datetime.min.time()).replace(tzinfo=timezone.utc)
@@ -75,12 +76,13 @@ async def analyse_stock_for_user(
         select(Recommendation).where(
             Recommendation.user_id == user.id,
             Recommendation.stock_symbol == symbol,
+            Recommendation.trade_horizon == TradeHorizon(horizon),
             Recommendation.is_active == True,
             Recommendation.created_at >= today_start,
         )
     )).scalar_one_or_none()
 
-    rec = existing or Recommendation(user_id=user.id, stock_symbol=symbol)
+    rec = existing or Recommendation(user_id=user.id, stock_symbol=symbol, trade_horizon=TradeHorizon(horizon))
     rec.stock_name = stock_data.get("company_name", symbol)
     rec.sector = stock_data.get("sector", "Unknown")
     rec.exchange = exchange
@@ -172,6 +174,29 @@ async def refresh_holdings_for_all_users():
 
 
 async def run_full_analysis_for_all_users(session_type: str = "scheduled"):
+    """Runs SWING and LONG-TERM horizon analysis for every active holding."""
+    async with AsyncSessionLocal() as db:
+        try:
+            users = (await db.execute(select(User).where(User.is_active == True))).scalars().all()
+            for user in users:
+                holdings = (
+                    await db.execute(
+                        select(Holding).where(Holding.user_id == user.id, Holding.is_active == True)
+                    )
+                ).scalars().all()
+                for holding in holdings:
+                    for horizon in ("SWING", "LONGTERM"):
+                        try:
+                            await analyse_stock_for_user(db, user, holding.tradingsymbol, holding.exchange, holding, horizon)
+                        except Exception:
+                            pass
+            await db.commit()
+        except Exception:
+            pass
+
+
+async def run_intraday_check_for_all_users():
+    """Runs INTRADAY horizon analysis for holdings and flags stop-loss breaches."""
     async with AsyncSessionLocal() as db:
         try:
             users = (await db.execute(select(User).where(User.is_active == True))).scalars().all()
@@ -183,26 +208,9 @@ async def run_full_analysis_for_all_users(session_type: str = "scheduled"):
                 ).scalars().all()
                 for holding in holdings:
                     try:
-                        await analyse_stock_for_user(db, user, holding.tradingsymbol, holding.exchange, holding)
+                        await analyse_stock_for_user(db, user, holding.tradingsymbol, holding.exchange, holding, "INTRADAY")
                     except Exception:
                         pass
-            await db.commit()
-        except Exception:
-            pass
-
-
-async def run_intraday_check_for_all_users():
-    """Lightweight intraday check – only flag stop-loss breaches."""
-    async with AsyncSessionLocal() as db:
-        try:
-            users = (await db.execute(select(User).where(User.is_active == True))).scalars().all()
-            for user in users:
-                holdings = (
-                    await db.execute(
-                        select(Holding).where(Holding.user_id == user.id, Holding.is_active == True)
-                    )
-                ).scalars().all()
-                for holding in holdings:
                     try:
                         stock_data = await _market_svc.get_stock_data(holding.tradingsymbol, holding.exchange, period="5d")
                         if not stock_data:
@@ -224,5 +232,6 @@ async def run_intraday_check_for_all_users():
                             )
                     except Exception:
                         pass
+            await db.commit()
         except Exception:
             pass

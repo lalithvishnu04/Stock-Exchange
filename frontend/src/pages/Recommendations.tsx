@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import {
   Box, Typography, Card, CardContent, TextField, Button, Grid,
   Dialog, DialogTitle, DialogContent, DialogActions, Alert, CircularProgress,
-  Chip, Tab, Tabs, Divider,
+  Chip, Tab, Tabs, Divider, ToggleButtonGroup, ToggleButton,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -16,12 +16,19 @@ import { recommendationsApi, portfolioApi } from '../api/endpoints';
 import SignalBadge from '../components/common/SignalBadge';
 import { useAutoAnalysis } from '../hooks/useAutoAnalysis';
 import { useSignalDetection } from '../hooks/useSignalDetection';
-import type { Recommendation } from '../types';
+import type { Recommendation, TradeHorizon } from '../types';
+
+const HORIZON_OPTIONS: { value: TradeHorizon; label: string }[] = [
+  { value: 'INTRADAY', label: 'Intraday' },
+  { value: 'SWING', label: 'Swing' },
+  { value: 'LONGTERM', label: 'Long-term' },
+];
 
 export default function RecommendationsPage() {
   const queryClient = useQueryClient();
   const [searchSymbol, setSearchSymbol] = useState('');
   const [tab, setTab] = useState<'market' | 'portfolio' | 'watchlist'>('market');
+  const [horizon, setHorizon] = useState<TradeHorizon>('SWING');
 
   // Buy new stock modal
   const [buyModal, setBuyModal] = useState(false);
@@ -38,14 +45,14 @@ export default function RecommendationsPage() {
   
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: marketPicks, isLoading: marketLoading } = useQuery({
-    queryKey: ['market-picks'],
-    queryFn: () => recommendationsApi.marketPicks().then((r) => r.data),
+    queryKey: ['market-picks', horizon],
+    queryFn: () => recommendationsApi.marketPicks(horizon).then((r) => r.data),
     refetchInterval: isMarketOpen ? 5 * 60 * 1000 : false, // Auto-refresh every 5 min if market open
   });
 
   const { data: portfolioRecs, isLoading: portfolioLoading } = useQuery({
-    queryKey: ['today-recommendations'],
-    queryFn: () => recommendationsApi.today().then((r) => r.data),
+    queryKey: ['today-recommendations', horizon],
+    queryFn: () => recommendationsApi.today(horizon).then((r) => r.data),
     refetchInterval: isMarketOpen ? 5 * 60 * 1000 : false,
   });
 
@@ -75,7 +82,7 @@ export default function RecommendationsPage() {
 
   // ── Mutations ────────────────────────────────────────────────────────────────
   const analyseMutation = useMutation({
-    mutationFn: (symbol: string) => recommendationsApi.analyse(symbol.toUpperCase(), 'NSE'),
+    mutationFn: (symbol: string) => recommendationsApi.analyse(symbol.toUpperCase(), 'NSE', horizon),
     onSuccess: (data) => {
       setSelectedStockForBuy(data.data);
       setBuyData((prev) => ({
@@ -106,7 +113,7 @@ export default function RecommendationsPage() {
   });
 
   const analyseAllMutation = useMutation({
-    mutationFn: () => recommendationsApi.analyseAll(),
+    mutationFn: () => recommendationsApi.analyseAll(horizon),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['today-recommendations'] });
     },
@@ -686,10 +693,22 @@ export default function RecommendationsPage() {
         </Card>
       )}
 
-      <Typography variant="h4" sx={{ mb: 3 }}>
+      <Typography variant="h4" sx={{ mb: 2 }}>
         <TrendingUpIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
         Recommendations
       </Typography>
+
+      <ToggleButtonGroup
+        value={horizon}
+        exclusive
+        size="small"
+        onChange={(_, v) => v && setHorizon(v)}
+        sx={{ mb: 3 }}
+      >
+        {HORIZON_OPTIONS.map((opt) => (
+          <ToggleButton key={opt.value} value={opt.value}>{opt.label}</ToggleButton>
+        ))}
+      </ToggleButtonGroup>
 
       <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
         <Tab label="Market Recommendations" value="market" />

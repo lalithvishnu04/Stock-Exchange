@@ -2,7 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel
-from app.models.recommendation import RecommendationSignal, RiskLevel
+from app.models.recommendation import RecommendationSignal, RiskLevel, TradeHorizon
 
 
 class RecommendationOut(BaseModel):
@@ -11,6 +11,7 @@ class RecommendationOut(BaseModel):
     stock_name: str
     sector: str
     exchange: str
+    trade_horizon: TradeHorizon
     signal: RecommendationSignal
     risk_level: RiskLevel
     confidence_score: float
@@ -78,4 +79,5 @@ class NewsItem(BaseModel):
 class AnalysisRequest(BaseModel):
     symbol: str
     exchange: str = "NSE"
+    horizon: TradeHorizon = TradeHorizon.SWING
     force_refresh: bool = False

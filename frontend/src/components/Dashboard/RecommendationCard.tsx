@@ -24,6 +24,10 @@ const SIGNAL_BORDER: Record<string, string> = {
   PARTIAL_SELL: '#d97706', SELL: '#dc2626', AVOID: '#6b7280',
 };
 
+const HORIZON_LABEL: Record<string, string> = {
+  INTRADAY: 'Intraday', SWING: 'Swing', LONGTERM: 'Long-term',
+};
+
 interface Props {
   rec: Recommendation;
 }
@@ -55,6 +59,11 @@ export default function RecommendationCard({ rec }: Props) {
             <SignalBadge signal={rec.signal} />
             <RiskBadge level={rec.risk_level} />
           </Box>
+        </Box>
+
+        {/* Trade horizon */}
+        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', mb: 1 }}>
+          <Chip label={HORIZON_LABEL[rec.trade_horizon] ?? rec.trade_horizon} size="small" sx={{ fontSize: '0.65rem', height: 20, bgcolor: 'rgba(139,92,246,0.15)', color: '#a78bfa' }} />
         </Box>
 
         {/* Price row */}
