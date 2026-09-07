@@ -119,11 +119,11 @@ async def _run_weekly_report():
 async def _run_market_scan_swing_longterm():
     """Scan the full stock universe for SWING and LONG-TERM 'new buy' candidates."""
     from app.services.analysis_runner import run_market_scan_for_all_users
-    await run_market_scan_for_all_users("SWING")
-    await run_market_scan_for_all_users("LONGTERM")
+    await run_market_scan_for_all_users("SWING", full_universe=True)
+    await run_market_scan_for_all_users("LONGTERM", full_universe=True)
 
 
 async def _run_market_scan_intraday():
     """Scan the full stock universe for INTRADAY 'new buy' candidates."""
     from app.services.analysis_runner import run_market_scan_for_all_users
-    await run_market_scan_for_all_users("INTRADAY")
+    await run_market_scan_for_all_users("INTRADAY", full_universe=True)

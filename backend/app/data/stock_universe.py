@@ -9,6 +9,16 @@ realistic about what a free yfinance-based pipeline can scan on a schedule.
 Update periodically — index/sector constituents shift over time.
 """
 
+# A small, diverse (spans most major sectors), high-confidence set of
+# well-known large-caps — used as the default fast scan so "Scan Market Now"
+# returns in well under a minute instead of scanning the full ~190-stock
+# universe, which can take several minutes.
+TOP_PICKS: list[str] = [
+    "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "HINDUNILVR",
+    "BHARTIARTL", "ITC", "SBIN", "LT", "BAJFINANCE", "MARUTI", "SUNPHARMA",
+    "TITAN", "ASIANPAINT", "ULTRACEMCO", "TATASTEEL", "NTPC", "ADANIPORTS", "WIPRO",
+]
+
 STOCK_UNIVERSE: list[str] = [
     # Banking & Financials
     "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "INDUSINDBK",

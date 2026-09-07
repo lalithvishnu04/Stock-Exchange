@@ -1,4 +1,5 @@
 """Core analysis orchestrator – runs full stock analysis pipeline."""
+import asyncio
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -29,6 +30,7 @@ async def analyse_stock_for_user(
     exchange: str = "NSE",
     holding: Holding | None = None,
     horizon: str = "SWING",
+    fetch_sentiment: bool = True,
 ) -> Recommendation | None:
     # Fetch market data using candles appropriate for this trade horizon
     stock_data = await _market_svc.get_stock_data_for_horizon(symbol, exchange, horizon)
@@ -42,8 +44,17 @@ async def analyse_stock_for_user(
     # Fundamental analysis
     fundamental = _fundamental_svc.analyze(stock_data)
 
-    # News sentiment
-    news = _sentiment_svc.get_news_for_symbol(symbol, stock_data.get("company_name", ""))
+    # News sentiment — this is a blocking HTTP call, so run it in a thread so it
+    # doesn't stall the single-worker event loop. Skipped entirely for bulk
+    # market-wide scans (fetch_sentiment=False) since NewsAPI's free tier is
+    # only 100 requests/day — not enough for hundreds of symbols, and it's
+    # more valuable spent on holdings / on-demand analysis than a bulk scan.
+    if fetch_sentiment:
+        news = await asyncio.to_thread(
+            _sentiment_svc.get_news_for_symbol, symbol, stock_data.get("company_name", "")
+        )
+    else:
+        news = []
     sentiment_agg = _sentiment_svc.aggregate_sentiment(news)
 
     # Portfolio context
@@ -237,12 +248,17 @@ async def run_intraday_check_for_all_users():
             pass
 
 
-async def run_market_scan_for_all_users(horizon: str = "SWING"):
-    """Scans the full stock universe (excluding each user's current holdings) and
-    stores recommendations, so /market-picks can just read pre-computed results
-    instead of running hundreds of yfinance calls inside an HTTP request.
+async def run_market_scan_for_all_users(horizon: str = "SWING", full_universe: bool = False):
+    """Scans a curated, diverse set of stocks (excluding each user's current
+    holdings) and stores recommendations, so /market-picks can just read
+    pre-computed results instead of running yfinance calls inside an HTTP
+    request. Defaults to a fast ~20-stock diverse "top picks" set that
+    finishes in well under a minute; pass full_universe=True to scan the
+    full ~190-stock universe instead (takes several minutes).
     """
-    from app.data.stock_universe import STOCK_UNIVERSE
+    from app.data.stock_universe import STOCK_UNIVERSE, TOP_PICKS
+
+    symbols = STOCK_UNIVERSE if full_universe else TOP_PICKS
 
     async with AsyncSessionLocal() as db:
         try:
@@ -251,11 +267,13 @@ async def run_market_scan_for_all_users(horizon: str = "SWING"):
                 held = set((await db.execute(
                     select(Holding.tradingsymbol).where(Holding.user_id == user.id, Holding.is_active == True)
                 )).scalars().all())
-                for symbol in STOCK_UNIVERSE:
+                for symbol in symbols:
                     if symbol in held:
                         continue
                     try:
-                        await analyse_stock_for_user(db, user, symbol, "NSE", holding=None, horizon=horizon)
+                        await analyse_stock_for_user(
+                            db, user, symbol, "NSE", holding=None, horizon=horizon, fetch_sentiment=False
+                        )
                         await db.commit()
                     except Exception:
                         await db.rollback()
