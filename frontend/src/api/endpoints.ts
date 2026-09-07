@@ -48,6 +48,8 @@ export const recommendationsApi = {
     apiClient.post<{ analysed: number; recommendations: Recommendation[] }>(`/recommendations/analyse-all?horizon=${horizon}`),
   marketPicks: (horizon: TradeHorizon = 'SWING') =>
     apiClient.get<Recommendation[]>(`/recommendations/market-picks?horizon=${horizon}`),
+  scanMarket: (horizon: TradeHorizon = 'SWING') =>
+    apiClient.post<{ message: string }>(`/recommendations/market-picks/scan?horizon=${horizon}`),
   marketOverview: () => apiClient.get<MarketOverview>('/recommendations/market-overview'),
   sectorPerformance: () => apiClient.get<SectorPerformance[]>('/recommendations/sector-performance'),
   news: (symbol?: string) =>

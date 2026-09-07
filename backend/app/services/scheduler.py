@@ -1,4 +1,5 @@
 """APScheduler-based background job runner."""
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
@@ -60,6 +61,27 @@ def setup_scheduler(app) -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # Market-wide scan (full stock universe, excluding each user's holdings) —
+    # populates /market-picks. Runs 30 min after pre-market holdings analysis so
+    # it doesn't compete with it on the single worker.
+    scan_time = (datetime(2000, 1, 1, int(pre_h), int(pre_m)) + timedelta(minutes=30)).time()
+    scheduler.add_job(
+        _run_market_scan_swing_longterm,
+        CronTrigger(day_of_week="mon-fri", hour=scan_time.hour, minute=scan_time.minute, timezone=IST),
+        id="market_scan_daily",
+        replace_existing=True,
+    )
+
+    # Intraday market scan — once shortly after market open (not every N
+    # minutes like the holdings check; scanning ~190 symbols that often would
+    # be too heavy for a free yfinance-based pipeline).
+    scheduler.add_job(
+        _run_market_scan_intraday,
+        CronTrigger(day_of_week="mon-fri", hour=9, minute=45, timezone=IST),
+        id="market_scan_intraday",
+        replace_existing=True,
+    )
+
     return scheduler
 
 
@@ -92,3 +114,16 @@ async def _run_daily_report():
 async def _run_weekly_report():
     from app.services.reports import generate_weekly_reports_for_all_users
     await generate_weekly_reports_for_all_users()
+
+
+async def _run_market_scan_swing_longterm():
+    """Scan the full stock universe for SWING and LONG-TERM 'new buy' candidates."""
+    from app.services.analysis_runner import run_market_scan_for_all_users
+    await run_market_scan_for_all_users("SWING")
+    await run_market_scan_for_all_users("LONGTERM")
+
+
+async def _run_market_scan_intraday():
+    """Scan the full stock universe for INTRADAY 'new buy' candidates."""
+    from app.services.analysis_runner import run_market_scan_for_all_users
+    await run_market_scan_for_all_users("INTRADAY")

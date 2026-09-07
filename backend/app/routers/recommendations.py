@@ -154,21 +154,12 @@ async def get_market_picks(
     db: Annotated[AsyncSession, Depends(get_db)],
     horizon: str = "SWING",
 ):
-    """Get recommendations for top-performing stocks from Nifty50 (market picks).
+    """Recommendations for stocks the user doesn't already hold ("new buy" candidates).
 
-    Only ever considers stocks the user doesn't already hold, so these are
-    always "new buy" candidates for the given trade horizon.
+    Reads pre-computed results from the scheduled market scan (see
+    /market-picks/scan) instead of running hundreds of yfinance calls inline —
+    scanning the full stock universe synchronously would time out the request.
     """
-    # Top Nifty50 stocks as starting list
-    TOP_NIFTY50 = [
-        ("RELIANCE", "NSE"), ("TCS", "NSE"), ("INFY", "NSE"), ("HINDUNILVR", "NSE"),
-        ("ICICIBANK", "NSE"), ("HDFC", "NSE"), ("BAJAJFINSV", "NSE"), ("LT", "NSE"),
-        ("AXISBANK", "NSE"), ("HCLTECH", "NSE"), ("MARUTI", "NSE"), ("KOTAKBANK", "NSE"),
-        ("ITC", "NSE"), ("SUNPHARMA", "NSE"), ("WIPRO", "NSE"), ("POWERGRID", "NSE"),
-        ("ULTRACEMCO", "NSE"), ("ASIANPAINT", "NSE"), ("BAJAJFINSV", "NSE"), ("TATAMOTORS", "NSE"),
-    ]
-    
-    # Get user's current holdings to exclude them
     from app.models.portfolio import Holding
     user_holdings = (await db.execute(
         select(Holding.tradingsymbol).where(
@@ -177,23 +168,37 @@ async def get_market_picks(
         )
     )).scalars().all()
     holding_symbols = set(s.upper() for s in user_holdings)
-    
-    results = []
-    for symbol, exchange in TOP_NIFTY50:
-        if symbol in holding_symbols:
-            continue  # Skip already holding stocks
-        try:
-            rec = await analyse_stock_for_user(
-                db, current_user, symbol, exchange, holding=None, horizon=horizon.upper()
-            )
-            if rec:
-                results.append(RecommendationOut.model_validate(rec))
-        except Exception:
-            pass
-    
-    # Sort by confidence score and return top 10
-    results.sort(key=lambda r: r.confidence_score, reverse=True)
-    return results[:10]
+
+    today_start = datetime.combine(date.today(), datetime.min.time()).replace(tzinfo=timezone.utc)
+    all_recs = (await db.execute(
+        select(Recommendation)
+        .where(
+            Recommendation.user_id == current_user.id,
+            Recommendation.trade_horizon == TradeHorizon(horizon.upper()),
+            Recommendation.is_active == True,
+            Recommendation.created_at >= today_start,
+        )
+        .order_by(Recommendation.confidence_score.desc())
+    )).scalars().all()
+
+    results = [r for r in all_recs if r.stock_symbol.upper() not in holding_symbols][:20]
+    return [RecommendationOut.model_validate(r) for r in results]
+
+
+@router.post("/market-picks/scan")
+async def trigger_market_scan(
+    background_tasks: BackgroundTasks,
+    current_user: Annotated[User, Depends(get_current_user)],
+    horizon: str = "SWING",
+):
+    """Kick off a full stock-universe scan in the background (~190 symbols).
+
+    Runs async since it takes several minutes; poll GET /market-picks afterwards
+    for results as they land.
+    """
+    from app.services.analysis_runner import run_market_scan_for_all_users
+    background_tasks.add_task(run_market_scan_for_all_users, horizon.upper())
+    return {"message": "Market scan started. This can take several minutes — refresh market picks shortly."}
 
 
 @router.get("/market-overview", response_model=MarketOverview)

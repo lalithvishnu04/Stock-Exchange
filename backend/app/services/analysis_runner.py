@@ -235,3 +235,29 @@ async def run_intraday_check_for_all_users():
             await db.commit()
         except Exception:
             pass
+
+
+async def run_market_scan_for_all_users(horizon: str = "SWING"):
+    """Scans the full stock universe (excluding each user's current holdings) and
+    stores recommendations, so /market-picks can just read pre-computed results
+    instead of running hundreds of yfinance calls inside an HTTP request.
+    """
+    from app.data.stock_universe import STOCK_UNIVERSE
+
+    async with AsyncSessionLocal() as db:
+        try:
+            users = (await db.execute(select(User).where(User.is_active == True))).scalars().all()
+            for user in users:
+                held = set((await db.execute(
+                    select(Holding.tradingsymbol).where(Holding.user_id == user.id, Holding.is_active == True)
+                )).scalars().all())
+                for symbol in STOCK_UNIVERSE:
+                    if symbol in held:
+                        continue
+                    try:
+                        await analyse_stock_for_user(db, user, symbol, "NSE", holding=None, horizon=horizon)
+                        await db.commit()
+                    except Exception:
+                        await db.rollback()
+        except Exception:
+            pass

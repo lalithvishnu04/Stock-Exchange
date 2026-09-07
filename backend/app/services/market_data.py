@@ -1,4 +1,5 @@
 """Market data fetching via yfinance with in-memory cache (Redis optional)."""
+import asyncio
 import time
 import json
 from datetime import datetime, timezone
@@ -68,7 +69,8 @@ class MarketDataService:
             return cached
 
         result = {}
-        tickers = yf.download(
+        tickers = await asyncio.to_thread(
+            yf.download,
             list(INDEX_SYMBOLS.values()),
             period="2d",
             interval="1d",
@@ -117,9 +119,16 @@ class MarketDataService:
             return cached
 
         yf_sym = to_yf_symbol(symbol, exchange)
-        ticker = yf.Ticker(yf_sym)
-        hist = ticker.history(period=period, interval=interval)
-        info = ticker.info or {}
+
+        def _fetch():
+            ticker = yf.Ticker(yf_sym)
+            hist = ticker.history(period=period, interval=interval)
+            info = ticker.info or {}
+            return hist, info
+
+        # yfinance is blocking I/O — run it in a thread so a large batch scan
+        # (hundreds of symbols) doesn't stall the event loop for other requests.
+        hist, info = await asyncio.to_thread(_fetch)
 
         if hist.empty:
             return {}
@@ -175,7 +184,7 @@ class MarketDataService:
         result = []
         for sector, etf in SECTOR_ETF_MAP.items():
             try:
-                df = yf.download(etf, period="2d", interval="1d", progress=False)
+                df = await asyncio.to_thread(yf.download, etf, period="2d", interval="1d", progress=False)
                 if not df.empty and len(df) >= 2:
                     last = float(df["Close"].iloc[-1])
                     prev = float(df["Close"].iloc[-2])

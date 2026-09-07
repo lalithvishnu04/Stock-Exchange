@@ -119,6 +119,10 @@ export default function RecommendationsPage() {
     },
   });
 
+  const scanMarketMutation = useMutation({
+    mutationFn: () => recommendationsApi.scanMarket(horizon),
+  });
+
   const addQuantityMutation = useMutation({
     mutationFn: (payload: typeof addQtyData) =>
       portfolioApi.updateHolding(payload.holdingId, {
@@ -237,11 +241,35 @@ export default function RecommendationsPage() {
             </Alert>
           )}
 
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            💡 <strong>Market Recommendations:</strong> Top performers from Nifty50 (excluding holdings)
-          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              💡 <strong>Market Recommendations:</strong> Scanned across ~190 liquid NSE stocks (excluding holdings)
+            </Typography>
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={scanMarketMutation.isPending ? <CircularProgress size={16} /> : <RefreshIcon />}
+              disabled={scanMarketMutation.isPending}
+              onClick={() => scanMarketMutation.mutate()}
+            >
+              Scan Market Now
+            </Button>
+          </Box>
+
+          {scanMarketMutation.isSuccess && (
+            <Alert severity="info" sx={{ mb: 2 }} onClose={() => scanMarketMutation.reset()}>
+              {scanMarketMutation.data.data.message}
+            </Alert>
+          )}
 
           {marketLoading && <Box sx={{ textAlign: 'center', py: 3 }}><CircularProgress /></Box>}
+
+          {!marketLoading && marketPicks?.length === 0 && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              No market picks yet for this horizon. Click <strong>"Scan Market Now"</strong> above
+              (runs in the background, takes a few minutes) — or wait for the next scheduled scan.
+            </Alert>
+          )}
 
           <Grid container spacing={2}>
             {marketPicks?.map((rec) => (

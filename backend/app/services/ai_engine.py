@@ -239,6 +239,13 @@ def _rule_based_recommendation(
     target = round(current_price * (1 + profile["target_pct"]), 2) if signal in ("BUY", "ADD_MORE") else None
     stop_loss = round(current_price * (1 - profile["stop_pct"]), 2) if signal in ("BUY", "ADD_MORE") else None
 
+    news_count = sentiment_agg.get("positive", 0) + sentiment_agg.get("negative", 0) + sentiment_agg.get("neutral", 0)
+    sentiment_summary = (
+        f"News sentiment is {sentiment_agg.get('overall', 'NEUTRAL')} (from {news_count} recent articles)."
+        if news_count > 0
+        else "No news data available (set NEWS_API_KEY to enable sentiment analysis) — this recommendation is technical/fundamental only."
+    )
+
     result = {
         "signal": signal,
         "risk_level": risk_level,
@@ -250,7 +257,7 @@ def _rule_based_recommendation(
         "technical_summary": f"Technical outlook is {technical.get('overall', 'NEUTRAL')} "
                               f"with RSI at {technical.get('rsi', 50):.1f}.",
         "fundamental_summary": f"Fundamentals rated {fundamental.get('overall', 'HOLD')}.",
-        "sentiment_summary": f"News sentiment is {sentiment_agg.get('overall', 'NEUTRAL')}.",
+        "sentiment_summary": sentiment_summary,
         "allocation_warning": None,
     }
     return _validate_and_apply_rules(result, portfolio_context, holding)
