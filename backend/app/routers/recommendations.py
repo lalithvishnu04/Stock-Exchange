@@ -191,14 +191,14 @@ async def trigger_market_scan(
     current_user: Annotated[User, Depends(get_current_user)],
     horizon: str = "SWING",
 ):
-    """Kick off a full stock-universe scan in the background (~190 symbols).
-
-    Runs async since it takes several minutes; poll GET /market-picks afterwards
-    for results as they land.
+    """Kick off a full ~190-stock universe scan in the background, ranked by
+    confidence score so GET /market-picks returns genuine top picks rather than
+    a fixed list. Runs async (non-blocking) since it takes a few minutes; poll
+    GET /market-picks afterwards for results as they land.
     """
     from app.services.analysis_runner import run_market_scan_for_all_users
-    background_tasks.add_task(run_market_scan_for_all_users, horizon.upper())
-    return {"message": "Market scan started. This can take several minutes — refresh market picks shortly."}
+    background_tasks.add_task(run_market_scan_for_all_users, horizon.upper(), True)
+    return {"message": "Full market scan started (~190 stocks, a few minutes) — refresh market picks shortly for top-ranked results."}
 
 
 @router.get("/market-overview", response_model=MarketOverview)
