@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import asyncio
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from app.core.deps import CurrentUser, DbSession
@@ -265,6 +266,15 @@ async def sync_portfolio(current_user: CurrentUser, db: DbSession):
         day_chg_pct = (day_chg / close * 100) if close else 0
         weight = (cur_val / total_value * 100)
 
+        # Kite's holdings API doesn't return company name/sector/industry —
+        # look those up from the same source used elsewhere (yfinance, with
+        # sector overrides for ETFs) so portfolio allocation checks group
+        # holdings by their real sector instead of all landing in "Unknown".
+        info = await asyncio.to_thread(lookup_stock, h["tradingsymbol"], h.get("exchange", "NSE"))
+        company_name = info["company_name"] if info else h.get("tradingsymbol", "")
+        sector = info["sector"] if info else "Unknown"
+        industry = info["industry"] if info else "Unknown"
+
         existing = (await db.execute(
             select(Holding).where(
                 Holding.user_id == current_user.id,
@@ -286,6 +296,9 @@ async def sync_portfolio(current_user: CurrentUser, db: DbSession):
             existing.portfolio_weight_pct = weight
             existing.is_active = True
             existing.last_synced_at = now
+            existing.company_name = company_name
+            existing.sector = sector
+            existing.industry = industry
         else:
             db.add(Holding(
                 user_id=current_user.id,
@@ -293,8 +306,9 @@ async def sync_portfolio(current_user: CurrentUser, db: DbSession):
                 exchange=h.get("exchange", "NSE"),
                 isin=h.get("isin"),
                 instrument_token=h.get("instrument_token"),
-                company_name=h.get("tradingsymbol", ""),
-                sector="Unknown",
+                company_name=company_name,
+                sector=sector,
+                industry=industry,
                 quantity=qty,
                 average_price=avg,
                 last_price=last,
