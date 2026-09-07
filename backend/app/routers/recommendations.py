@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, date
+import math
 from typing import Annotated
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from sqlalchemy import select
@@ -15,6 +16,14 @@ from app.services.analysis_runner import analyse_stock_for_user
 router = APIRouter(prefix="/recommendations", tags=["recommendations"])
 _sentiment_svc = SentimentService()
 _market_svc = MarketDataService()
+
+
+def _is_valid(r: Recommendation) -> bool:
+    """Guards against a handful of pre-existing rows with a NaN price (from a
+    now-fixed yfinance data bug) that would otherwise crash response
+    serialization (Decimal NaN isn't a valid finite number for the schema).
+    """
+    return math.isfinite(float(r.current_price))
 
 
 @router.get("/today", response_model=TodayRecommendations)
@@ -36,7 +45,7 @@ async def get_today_recommendations(
         .where(*conditions)
         .order_by(Recommendation.created_at.desc())
     )
-    all_recs = result.scalars().all()
+    all_recs = [r for r in result.scalars().all() if _is_valid(r)]
 
     # Defend against pre-existing duplicate rows (e.g. from before analysis
     # was made idempotent): keep only the most recent recommendation per symbol.
@@ -87,7 +96,7 @@ async def get_recommendation_history(
         q = q.where(Recommendation.stock_symbol == symbol.upper())
     q = q.order_by(Recommendation.created_at.desc()).limit(min(limit, 500))
     result = await db.execute(q)
-    return result.scalars().all()
+    return [r for r in result.scalars().all() if _is_valid(r)]
 
 
 @router.post("/analyse")
@@ -181,7 +190,7 @@ async def get_market_picks(
         .order_by(Recommendation.confidence_score.desc())
     )).scalars().all()
 
-    results = [r for r in all_recs if r.stock_symbol.upper() not in holding_symbols][:20]
+    results = [r for r in all_recs if _is_valid(r) and r.stock_symbol.upper() not in holding_symbols][:20]
     return [RecommendationOut.model_validate(r) for r in results]
 
 

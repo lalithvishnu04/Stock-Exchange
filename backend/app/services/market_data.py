@@ -133,6 +133,14 @@ class MarketDataService:
         if hist.empty:
             return {}
 
+        # The most recent candle (esp. weekly/intraday) can be a still-forming,
+        # partial bar with NaN OHLC values — drop trailing NaN rows so a NaN
+        # price never flows into recommendations/DB storage and breaks
+        # serialization later.
+        hist = hist.dropna(subset=["Close"])
+        if hist.empty:
+            return {}
+
         data = {
             "symbol": symbol,
             "exchange": exchange,

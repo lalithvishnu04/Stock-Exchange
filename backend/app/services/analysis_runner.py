@@ -1,5 +1,6 @@
 """Core analysis orchestrator – runs full stock analysis pipeline."""
 import asyncio
+import math
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -35,6 +36,10 @@ async def analyse_stock_for_user(
     # Fetch market data using candles appropriate for this trade horizon
     stock_data = await _market_svc.get_stock_data_for_horizon(symbol, exchange, horizon)
     if not stock_data:
+        return None
+    # Defense-in-depth: never persist a NaN/infinite price (breaks response
+    # serialization later) — treat it the same as "no data" for this symbol.
+    if not math.isfinite(stock_data.get("current_price", float("nan"))):
         return None
 
     # Technical analysis
