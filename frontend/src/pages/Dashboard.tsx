@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Box, Grid, Card, CardContent, Typography, Skeleton,
   Alert, Button, Tooltip, LinearProgress, Stack, Divider, Chip,
+  ToggleButtonGroup, ToggleButton, Slider, FormControl, InputLabel, Select, MenuItem,
 } from '@mui/material';
 import SyncIcon from '@mui/icons-material/Sync';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
@@ -14,7 +15,7 @@ import MarketOverviewWidget from '../components/Dashboard/MarketOverviewWidget';
 import SectorAllocationChart from '../components/Dashboard/SectorAllocationChart';
 import StockAllocationChart from '../components/Dashboard/StockAllocationChart';
 import NewsSentimentWidget from '../components/Dashboard/NewsSentimentWidget';
-import type { Recommendation } from '../types';
+import type { Recommendation, TradeHorizon, RiskLevel } from '../types';
 
 function fmt(n: number, decimals = 2) {
   return n.toLocaleString('en-IN', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -68,6 +69,9 @@ function SignalGroup({ title, recs, color }: { title: string; recs: Recommendati
 
 export default function DashboardPage() {
   const qc = useQueryClient();
+  const [horizonFilter, setHorizonFilter] = React.useState<TradeHorizon | 'ALL'>('ALL');
+  const [riskFilter, setRiskFilter] = React.useState<RiskLevel | 'ALL'>('ALL');
+  const [minConfidence, setMinConfidence] = React.useState(0);
 
   const { data: summary, isLoading: summLoading } = useQuery({
     queryKey: ['portfolio-summary'],
@@ -76,8 +80,8 @@ export default function DashboardPage() {
   });
 
   const { data: today, isLoading: recLoading } = useQuery({
-    queryKey: ['today-recommendations'],
-    queryFn: () => recommendationsApi.today().then((r) => r.data),
+    queryKey: ['today-recommendations', horizonFilter],
+    queryFn: () => recommendationsApi.today(horizonFilter === 'ALL' ? undefined : horizonFilter).then((r) => r.data),
     refetchInterval: 300_000,
   });
 
@@ -97,6 +101,9 @@ export default function DashboardPage() {
   const totalPnl = summary?.total_pnl ?? 0;
   const dayChg = summary?.total_day_change ?? 0;
   const violations = allocations?.violations ?? [];
+
+  const filterRecs = (recs: Recommendation[] = []) =>
+    recs.filter((r) => (riskFilter === 'ALL' || r.risk_level === riskFilter) && r.confidence_score >= minConfidence);
 
   return (
     <Box>
@@ -180,7 +187,7 @@ export default function DashboardPage() {
       {/* Today's Recommendations */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, flexWrap: 'wrap', gap: 1 }}>
             <Typography variant="h6" fontWeight={700}>
               📊 Today's Recommendations
             </Typography>
@@ -189,6 +196,50 @@ export default function DashboardPage() {
                 Updated {new Date(today.last_updated).toLocaleTimeString('en-IN')}
               </Typography>
             )}
+          </Box>
+
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 2, mb: 2 }}>
+            <ToggleButtonGroup
+              value={horizonFilter}
+              exclusive
+              size="small"
+              onChange={(_, v) => v && setHorizonFilter(v)}
+            >
+              <ToggleButton value="ALL">All</ToggleButton>
+              <ToggleButton value="INTRADAY">Intraday</ToggleButton>
+              <ToggleButton value="SWING">Swing</ToggleButton>
+              <ToggleButton value="LONGTERM">Long-term</ToggleButton>
+            </ToggleButtonGroup>
+
+            <FormControl size="small" sx={{ minWidth: 120 }}>
+              <InputLabel id="risk-filter-label">Risk</InputLabel>
+              <Select
+                labelId="risk-filter-label"
+                label="Risk"
+                value={riskFilter}
+                onChange={(e) => setRiskFilter(e.target.value as RiskLevel | 'ALL')}
+              >
+                <MenuItem value="ALL">All Risk</MenuItem>
+                <MenuItem value="LOW">Low</MenuItem>
+                <MenuItem value="MEDIUM">Medium</MenuItem>
+                <MenuItem value="HIGH">High</MenuItem>
+              </Select>
+            </FormControl>
+
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 220 }}>
+              <Typography variant="body2" color="text.secondary" whiteSpace="nowrap">
+                Min Confidence: {minConfidence}%
+              </Typography>
+              <Slider
+                value={minConfidence}
+                onChange={(_, v) => setMinConfidence(v as number)}
+                min={0}
+                max={90}
+                step={10}
+                size="small"
+                sx={{ width: 120 }}
+              />
+            </Box>
           </Box>
 
           {recLoading && <LinearProgress sx={{ mb: 2 }} />}
@@ -201,14 +252,24 @@ export default function DashboardPage() {
             </Box>
           )}
 
+          {today && today.total_count > 0 &&
+            filterRecs(today.buy).length + filterRecs(today.add_more).length + filterRecs(today.hold).length
+              + filterRecs(today.partial_sell).length + filterRecs(today.sell).length + filterRecs(today.avoid).length === 0 && (
+            <Box sx={{ textAlign: 'center', py: 4 }}>
+              <Typography color="text.secondary">
+                No recommendations match these filters. Try lowering the confidence threshold or changing risk level.
+              </Typography>
+            </Box>
+          )}
+
           {today && (
             <>
-              <SignalGroup title="BUY TODAY" recs={today.buy} color="#16a34a" />
-              <SignalGroup title="ADD MORE TODAY" recs={today.add_more} color="#22c55e" />
-              <SignalGroup title="HOLD TODAY" recs={today.hold} color="#2563eb" />
-              <SignalGroup title="PARTIAL SELL TODAY" recs={today.partial_sell} color="#d97706" />
-              <SignalGroup title="SELL TODAY" recs={today.sell} color="#dc2626" />
-              <SignalGroup title="AVOID TODAY" recs={today.avoid} color="#6b7280" />
+              <SignalGroup title="BUY TODAY" recs={filterRecs(today.buy)} color="#16a34a" />
+              <SignalGroup title="ADD MORE TODAY" recs={filterRecs(today.add_more)} color="#22c55e" />
+              <SignalGroup title="HOLD TODAY" recs={filterRecs(today.hold)} color="#2563eb" />
+              <SignalGroup title="PARTIAL SELL TODAY" recs={filterRecs(today.partial_sell)} color="#d97706" />
+              <SignalGroup title="SELL TODAY" recs={filterRecs(today.sell)} color="#dc2626" />
+              <SignalGroup title="AVOID TODAY" recs={filterRecs(today.avoid)} color="#6b7280" />
             </>
           )}
         </CardContent>
