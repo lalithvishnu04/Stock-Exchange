@@ -150,3 +150,32 @@ class ZerodhaService:
             return self._kite.holdings()
         except Exception:
             return []
+    def get_pending_delivery_positions(self) -> list[dict]:
+        """Same-day CNC (delivery) buys that haven't settled into holdings yet.
+
+        Zerodha only moves a delivery buy from "Positions" into "Holdings"
+        after T+1 settlement (next trading day) — until then it's invisible to
+        get_holdings(). Returns them pre-shaped like a holdings dict so they
+        can be merged in immediately instead of waiting a day.
+        """
+        if not self._access_token:
+            return []
+        try:
+            positions = self._kite.positions()
+        except Exception:
+            return []
+
+        pending = []
+        for p in positions.get("net", []):
+            if p.get("product") == "CNC" and p.get("quantity", 0) > 0:
+                pending.append({
+                    "tradingsymbol": p["tradingsymbol"],
+                    "exchange": p.get("exchange", "NSE"),
+                    "isin": None,
+                    "instrument_token": p.get("instrument_token"),
+                    "quantity": p["quantity"],
+                    "average_price": p.get("average_price", 0),
+                    "last_price": p.get("last_price", 0),
+                    "close_price": p.get("close_price", 0),
+                })
+        return pending

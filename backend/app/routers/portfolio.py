@@ -238,6 +238,14 @@ async def sync_portfolio(current_user: CurrentUser, db: DbSession):
     svc.set_access_token(current_user.zerodha_access_token)
     raw_holdings = svc.get_holdings()
 
+    # Same-day delivery (CNC) buys sit under Zerodha's "Positions" until T+1
+    # settlement moves them into "Holdings" the next trading day — merge them
+    # in now instead of making the user wait a day to see a just-bought stock.
+    held_symbols = {h["tradingsymbol"] for h in raw_holdings}
+    for p in svc.get_pending_delivery_positions():
+        if p["tradingsymbol"] not in held_symbols:
+            raw_holdings.append(p)
+
     if not raw_holdings:
         return {"message": "No holdings found or Zerodha token expired", "count": 0}
 
