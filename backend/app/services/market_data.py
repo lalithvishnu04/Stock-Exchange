@@ -2,7 +2,7 @@
 import asyncio
 import time
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import pandas as pd
 import yfinance as yf
@@ -94,11 +94,14 @@ class MarketDataService:
 
         result["as_of"] = datetime.now(timezone.utc).isoformat()
         now = datetime.now(timezone.utc)
-        # Market is OPEN Mon-Fri 9:15-15:30 IST (UTC+5:30)
-        ist_hour = (now.hour + 5) % 24
-        ist_minute = (now.minute + 30) % 60
-        ist_time = ist_hour * 60 + ist_minute
-        if now.weekday() < 5 and 555 <= ist_time <= 930:
+        # Market is OPEN Mon-Fri 9:15-15:30 IST (UTC+5:30). Convert via timedelta
+        # (not raw hour/minute arithmetic) so the minute overflow correctly
+        # carries into the hour — the previous version silently lost up to 59
+        # minutes whenever the UTC minute was >= 30, making the market appear
+        # closed for large chunks of actual trading hours.
+        ist_now = now + timedelta(hours=5, minutes=30)
+        ist_time = ist_now.hour * 60 + ist_now.minute
+        if ist_now.weekday() < 5 and 555 <= ist_time <= 930:
             result["market_status"] = "OPEN"
         else:
             result["market_status"] = "CLOSED"
