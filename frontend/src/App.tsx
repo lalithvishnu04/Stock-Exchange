@@ -1,7 +1,8 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { ThemeProvider, createTheme, CssBaseline } from '@mui/material';
+import { ThemeProvider, createTheme, CssBaseline, Box, CircularProgress } from '@mui/material';
 import { useAuthStore } from './store/authStore';
+import { authApi } from './api/endpoints';
 import Layout from './components/Layout/Layout';
 import LoginPage from './pages/Login';
 import DashboardPage from './pages/Dashboard';
@@ -42,8 +43,33 @@ const darkTheme = createTheme({
 });
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+  const { isAuthenticated, user, setUser, logout } = useAuthStore();
+  const [loading, setLoading] = React.useState(!user);
+
+  // The JWT persists in localStorage across refreshes, but the `user` object
+  // (name, email, Zerodha connection status, etc.) only ever gets populated
+  // right after login — refreshing the page reset it to null with nothing to
+  // reload it. Bootstrap it here so it survives refreshes on any page.
+  React.useEffect(() => {
+    if (!isAuthenticated || user) {
+      setLoading(false);
+      return;
+    }
+    authApi.me()
+      .then((res) => setUser(res.data))
+      .catch(() => logout())
+      .finally(() => setLoading(false));
+  }, [isAuthenticated, user, setUser, logout]);
+
+  if (!isAuthenticated) return <Navigate to="/login" replace />;
+  if (loading) {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+  return <>{children}</>;
 }
 
 export default function App() {
